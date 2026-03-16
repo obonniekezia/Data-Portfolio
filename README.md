@@ -3,6 +3,7 @@
 Welcome to my data analysis and data cleaning portfolio.
 
 I am a Master's student in Econometrics and Statistics at Toulouse School of Economics.  
+I want to share some projects in Data analysis and Data Science. 
 This repository presents several projects involving:
 
 - Data cleaning and preprocessing
@@ -17,19 +18,6 @@ This repository presents several projects involving:
 - SQL
 - SAS
 - Excel
-
-## Projects
-
-### Cannabis Legalization Study
-Cleaning and merging multiple datasets to study the impact of cannabis legalization on police and corrections expenditure shares in public budgets.
-
-### SQL Analysis – Toulouse Construction Sites (2024)
-Creation of database tables and exploratory SQL analysis using data on construction projects in Toulouse.
-
-### Digitalization and Income Level Analysis
-Descriptive and predictive analysis using digitalization indicators and macroeconomic variables to classify countries by income level.
-
-
 
 Bonnie Owono Nkama  
 Master in Econometrics and Statistics  
