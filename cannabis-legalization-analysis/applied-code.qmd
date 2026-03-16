@@ -1,0 +1,437 @@
+---
+title: "Applied"
+format: html
+editor: visual
+---
+
+```{r}
+sink("resultats_modeles_TWFE.txt")
+```
+
+## How the legalization of cannabis affect public spending on policing in the 212 biggest cities of the US
+
+```{r}
+
+library(readxl)
+library(tidyverse)
+library(plm)
+library(fixest)
+library(lmtest)    
+library(sandwich)  
+library(car)
+library(stargazer)
+library(did) 
+library(dplyr)
+library(ggplot2)
+library(gtsummary)
+library(tidyr)
+library(readr) 
+
+```
+
+### Data Base
+
+```{r}
+help(readxl)
+data <- read_excel("data_clean.xlsx") 
+#View(data)
+
+data$log_population <- log(data$city_population)
+
+View(data)
+table(data$permissive)
+```
+
+### Model
+
+```{r}
+
+print("==================================================")
+print("MODELE 1 : Share Police ~ permissive")
+print("==================================================")
+
+twfe1 <- plm(police_share ~ permissive, 
+                  data = data, 
+                  index = c("city_name", "year"), 
+                  model = "within", 
+                  effect = "twoways") 
+summary(twfe1)
+#summary(twfe1)$coefficients
+#summary(twfe1)$r.squared
+
+print("==================================================")
+print("MODELE 2 : Share Correction ~ permissive")
+print("==================================================")
+
+twfe2 <- plm(correction_share ~ permissive, 
+                  data = data, 
+                  index = c("city_name", "year"), 
+                  model = "within", 
+                  effect = "twoways") 
+summary(twfe2)
+#summary(twfe2)$coefficients
+#summary(twfe2)$r.squared
+```
+
+```{r}
+
+print("==================================================")
+print("MODELE 3 : Share Police ~ permissive + controls")
+print("==================================================")
+
+twfe1_cont <- plm(police_share ~ permissive + log_population + rev_general_city, 
+                  data = data, 
+                  index = c("city_name", "year"), 
+                  model = "within", 
+                  effect = "twoways") 
+summary(twfe1_cont)
+#summary(twfe1_cont)$coefficients
+#summary(twfe1_cont)$r.squared
+
+print("==================================================")
+print("MODELE 4 : Share Correction ~ permissive + controls")
+print("==================================================")
+
+twfe2_cont <- plm(correction_share ~ permissive + log_population + rev_general_city, 
+                  data = data, 
+                  index = c("city_name", "year"), 
+                  model = "within", 
+                  effect = "twoways") 
+summary(twfe2_cont)
+#summary(twfe2_cont)$coefficients
+#summary(twfe2_cont)$r.squared
+
+```
+
+For the estimation of the main model, the permissiveness index (multi-level scale) is replaced by a binary variable (bi_permissive_RCL) that is activated only when recreational legalization occurs. This simplification ensures the reliability of the results in the face of two mathematical limitations of the fixed effects model (TWFE):
+
+\- The base index makes irregular jumps (e.g., a direct jump from level 2 to 6). Using this raw scale would force the model to consider that each additional point changes the budget in exactly the same way (strictly linear effect). In institutional reality, a small administrative change does not have the same financial weight as full legalization. The use of a binary variable isolates the true shock without assuming false proportionality.
+
+\- The permissiveness scale shows that some states increase their level and then reduce it later (e.g., a return from level 6 to 2). Mathematically, the TWFE model is unable to handle these reversals without creating severe biases (the problem of “negative weights” identified by de Chaisemartin and D'Haultfœuille). The model would start using cities that repeal their laws as a point of comparison for those that legalize. The binary variable allows this bias to be purged by focusing on a net transition.
+
+Analysis of legislative trajectories revealed that the state of Alaska (AK) exhibited non-monotonic adoption of the law, characterized by a transition to RCL (change from index 6 to 7) followed by revocation to MML status (return from index 7 to 6). The continued treatment of an individual undergoing reversible treatment violated the absorbing treatment hypothesis required by the two-way fixed effects estimator (TWFE), and since this state represented only 2 of the 212 municipalities in the panel, these observations were excluded from the sample to prevent estimation bias.
+
+```{r}
+data <- data %>%
+  filter(state_code != "AK")
+
+```
+
+We did a TWFE on share_police and share_correction. We used as treatment variable bi_permissive_RCL and the original permissive without any control variables.
+
+```{r}
+
+print("==================================================")
+print("MODELE 5 : Share Police ~ bi_permissive_RCL ")
+print("==================================================")
+twfe_RCL1 <- plm(police_share ~ bi_permissive_RCL, 
+                  data = data, 
+                  index = c("city_name", "year"), 
+                  model = "within", 
+                  effect = "twoways") 
+summary(twfe_RCL1)
+#summary(twfe_RCL1)$coefficients
+#summary(twfe_RCL1)$r.squared
+
+print("==================================================")
+print("MODELE 6 : Share Correction ~ bi_permissive_RCL ")
+print("==================================================")
+
+twfe_RCL2 <- plm(correction_share ~ bi_permissive_RCL, 
+                  data = data, 
+                  index = c("city_name", "year"), 
+                  model = "within", 
+                  effect = "twoways") 
+summary(twfe_RCL2)
+#summary(twfe_RCL2)$coefficients
+#summary(twfe_RCL2)$r.squared
+
+```
+
+Without any control variables, the implementation of RCL is associated with a 0.48 percentage point decrease in the share of the budget allocated to policing. However, this result is only marginally significant (at the 10% level).\
+\
+This is a statistically significant effect (at the 1% level). Cities in states that legalized recreational cannabis see a 0.73 percentage point drop in the share of their budget spent on corrections (jails, prisons, probation). This makes intuitive sense: fewer cannabis-related arrests lead to lower correctional facility burdens.
+
+We do the exact same regression with control variables
+
+```{r}
+print("==================================================")
+print("MODELE 7 : Share Police ~ bi_permissive_RCL + controls ")
+print("==================================================")
+twfe_RCL1_cont <- plm(police_share ~ bi_permissive_RCL + log_population + rev_general_city, 
+                  data = data, 
+                  index = c("city_name", "year"), 
+                  model = "within", 
+                  effect = "twoways") 
+summary(twfe_RCL1_cont)
+#summary(twfe_RCL1_cont)$coefficients
+#summary(twfe_RCL1_cont)$r.squared
+
+print("==================================================")
+print("MODELE 8 : Share Correction ~ bi_permissive_RCL + controls ")
+print("==================================================")
+
+twfe_RCL2_cont <- plm(correction_share ~ bi_permissive_RCL + log_population + rev_general_city, 
+                  data = data, 
+                  index = c("city_name", "year"), 
+                  model = "within", 
+                  effect = "twoways") 
+summary(twfe_RCL2_cont)
+#summary(twfe_RCL2_cont)$coefficients
+#summary(twfe_RCL2_cont)$r.squared
+```
+
+The RCL coefficient drops to -0.0010 and completely loses its statistical significance (p = 0.671). Meanwhile, rev_general_city is highly significant and negative. This is a classic case of omitted variable bias in Model 5. Once you control for how much money a city makes (rev_general_city), the effect of cannabis legalization on the police budget share evaporates entirely. The drop we saw in Model 5 was mostly because RCL cities tend to be wealthier or have different revenue profiles, not because of the legalization itself.
+
+The RCL coefficient shrinks to -0.0053 and is now only marginally significant (p = 0.0506). log_population and rev_general_city are both significant and negative. The strong effect we saw in Model 6 is weakened. While legalization still exerts some downward pressure on the correction budget share, city revenue and population size are doing a lot of the heavy lifting here. Larger and wealthier cities naturally dedicate a smaller share of their budget to corrections.
+
+Following the previous results and after reading the police report in the USA, we decided to see what effect legalization would have depending on the size of different cities. We therefore divided cities into five categories, based on the classification used in the police reports from the Bureau of Justice Statistics.
+
+```{r}
+city_summary <- data %>%
+  group_by(city_name) %>%
+  summarise(
+    mean_pop = mean(city_population, na.rm = TRUE),
+    ever_treated = if_else(max(bi_permissive_RCL, na.rm = TRUE) == 1, "Treated", "Control")
+  ) %>%
+  ungroup()
+
+city_summary <- city_summary %>%
+  mutate(
+    city_class5 = case_when(
+      mean_pop >= 1000000 ~ "Megalopoles (+1M)",
+      mean_pop >= 500000  ~ "Very big city (500k-999k)",
+      mean_pop >= 250000  ~ "Big city (250k-499k)",
+      mean_pop >= 100000  ~ "Medium city (100k-249k)",
+      TRUE                ~ "City with less than 100k"
+    )
+  )
+
+distribution_table <- city_summary %>%
+  count(city_class5, ever_treated) %>%
+  pivot_wider(
+    names_from = ever_treated, 
+    values_from = n, 
+    values_fill = list(n = 0)
+  ) %>%
+  mutate(Total = Control + Treated)
+
+print(distribution_table)
+
+```
+
+With this distribution, we would not have enough individuals per category. In order to maintain meaning and still be able to perform analyses, we kept only three categories: cities with more than 250,000 inhabitants, cities with between 100,000 and 250,000 inhabitants, and cities with fewer than 100,000 inhabitants.
+
+```{r}
+data <- data %>%
+  group_by(city_name) %>%
+  mutate(
+    mean_city_pop = mean(city_population, na.rm = TRUE),
+    city_class = case_when(
+      mean_city_pop >= 250000 ~ "250k and more",
+      mean_city_pop >= 100000 ~ "100k to 249k",
+      TRUE                    ~ "less than 100k"
+    )
+  ) %>%
+  ungroup() %>%
+  
+  mutate(
+    city_class = factor(city_class, 
+                        levels = c("less than 100k", 
+                                   "100k to 249k", 
+                                   "250k and more"))
+  )
+```
+
+```{r}
+print("==================================================")
+print("MODELE 9 : Share Police ~ bi_permissive_RCL*city_class  + controls ")
+print("==================================================")
+twfe_RCL1_class <- plm(police_share ~ bi_permissive_RCL*city_class + log_population + rev_general_city, 
+                  data = data, 
+                  index = c("city_name", "year"), 
+                  model = "within", 
+                  effect = "twoways") 
+summary(twfe_RCL1_class)
+#summary(twfe_RCL1_class)$coefficients
+#summary(twfe_RCL1_class)$r.squared
+
+print("==================================================")
+print("MODELE 10 : Share Correction ~ bi_permissive_RCL*city_class  + controls ")
+print("==================================================")
+twfe_RCL2_class <- plm(correction_share ~ bi_permissive_RCL*city_class + log_population + rev_general_city, 
+                  data = data, 
+                  index = c("city_name", "year"), 
+                  model = "within", 
+                  effect = "twoways") 
+summary(twfe_RCL2_class)
+#summary(twfe_RCL2_class)$coefficients
+#summary(twfe_RCL2_class)$r.squared
+```
+
+The baseline effect (cities under 100k) is -0.024 (p \< 0.001). For medium cities (100k-249k) its +0.020 (p \< 0.001). The interaction for large cities (250k+) is +0.045 (p \< 0.001), creating a net positive effect of +0.021. Legalization has a highly polarizing effect based on city size. It significantly decreases the police budget share in small towns (by about 2.4 percentage points), but actually increases it in major metropolitan areas (by about 2.1 percentage points).
+
+The baseline effect (cities under 100k) is -0.011 (p = 0.014). However, the interaction terms for both medium cities (+0.008, p = 0.184) and large cities (+0.008, p = 0.156) are not statistically significant. Legalization reduces the correction budget share by 1.1 percentage points in smaller cities, which makes sense given fewer cannabis-related incarcerations. Because the interaction terms are not significant, we cannot confidently say this trend differs for larger cities; the reduction effect is mostly homogeneous.
+
+```{r warning = FALSE}
+
+data <- data %>%
+  group_by(city_name) %>%
+  mutate(
+    year_of_legalization = min(year[bi_permissive_RCL == 1], na.rm = TRUE)
+  ) %>%
+  mutate(
+    year_of_legalization = ifelse(is.infinite(year_of_legalization), NA, year_of_legalization)
+  ) %>%
+  ungroup()
+View(data_test)
+```
+
+```{r}
+
+data$time_to_treatment <- data$year - data$year_of_legalization
+
+for(k in -3:2) {
+  if(k != -1) { 
+    if(k < 0) {
+    data[[paste0("time_pre", abs(k))]] <- as.numeric(data$time_to_treatment == k)
+    } else {
+    data[[paste0("time_pos", k)]] <- as.numeric(data$time_to_treatment == k)
+  }}
+}
+
+print("==================================================")
+print("MODELE 11 : Share Police ~ bi_permissive_RCL*city_class*time{-5:4}  + controls ")
+print("==================================================")
+ps_es1 <- plm(police_share ~ (time_pre3 + time_pre2 + time_pos0 + time_pos1 + time_pos2)*city_class + log_population + rev_general_city,
+                   data = data,
+                   model = "within",
+                   effect = "twoways")
+summary(ps_es1)
+
+print("==================================================")
+print("MODELE 12 : Share Correction ~ bi_permissive_RCL*city_class*time{-5:4}  + controls ")
+print("==================================================")
+cs_es1 <- plm(correction_share ~ (time_pre3 + time_pre2 + time_pos0 + time_pos1 + time_pos2)*city_class+ log_population + rev_general_city,
+                   data = data,
+                   model = "within",
+                   effect = "twoways")
+summary(cs_es1)
+```
+
+The model tracks the police budget year by year around the time the law passes. If we look at time_pre3, time_pre2, and their interactions, none of them are statistically significant. It proves that small and large cities were not already on diverging trajectories for police spending before the law changed.
+
+For the baseline (small cities), the coefficients become significantly negative right after legalization: time_pos1 (-0.020) and time_pos2 (-0.022) at 1% level. For large cities (250k+), the interactions become massively positive and significant immediately: time_pos0 (+0.024), time_pos1 (+0.042), and time_pos2 (+0.048).
+
+Almost every single time dummy and interaction term is statistically insignificant. While Model 8 hinted at a slight overall reduction in correction shares, the event study shows that this does not follow a clear, dynamic timeline, nor does it differ significantly by city size. The impact of legalization on correction budget shares is flat.
+
+```{r}
+
+generer_donnees_graphique <- function(modele, nom_modele) {
+  
+  periodes_noms <- c("time_pre3", "time_pre2", "time_pos0", "time_pos1", "time_pos2")
+  periodes_num <- c(-3, -2, 0, 1, 2)
+  
+  resultats <- data.frame()
+  
+  for (i in seq_along(periodes_noms)) {
+    var_base <- periodes_noms[i]
+    t_num <- periodes_num[i]
+    
+    est_base <- coef(modele)[var_base]
+    se_base <- sqrt(vcov(modele)[var_base, var_base])
+    
+    resultats <- rbind(resultats, data.frame(
+      modele = nom_modele, time = t_num, city_class = "less than 100k",
+      estimate = est_base, 
+      conf.low = est_base - 1.96 * se_base, conf.high = est_base + 1.96 * se_base
+    ))
+    
+    var_inter_B <- paste0(var_base, ":city_class100k to 249k")
+    
+    est_B <- coef(modele)[var_base] + coef(modele)[var_inter_B]
+    se_B <- sqrt(vcov(modele)[var_base, var_base] + 
+                 vcov(modele)[var_inter_B, var_inter_B] + 
+                 2 * vcov(modele)[var_base, var_inter_B])
+    
+    resultats <- rbind(resultats, data.frame(
+      modele = nom_modele, time = t_num, city_class = "100k to 249k",
+      estimate = est_B, 
+      conf.low = est_B - 1.96 * se_B, conf.high = est_B + 1.96 * se_B
+    ))
+    
+ 
+    var_inter_A <- paste0(var_base, ":city_class250k and more")
+    
+    est_A <- coef(modele)[var_base] + coef(modele)[var_inter_A]
+    se_A <- sqrt(vcov(modele)[var_base, var_base] + 
+                 vcov(modele)[var_inter_A, var_inter_A] + 
+                 2 * vcov(modele)[var_base, var_inter_A])
+    
+    resultats <- rbind(resultats, data.frame(
+      modele = nom_modele, time = t_num, city_class = "250k and more",
+      estimate = est_A, 
+      conf.low = est_A - 1.96 * se_A, conf.high = est_A + 1.96 * se_A
+    ))
+  }
+  
+  ref_data <- expand.grid(
+    modele = nom_modele, time = -1, 
+    city_class = c("less than 100k", "100k to 249k", "250k and more"),
+    estimate = 0, conf.low = 0, conf.high = 0
+  )
+  
+  return(bind_rows(resultats, ref_data) %>% arrange(city_class, time))
+}
+
+donnees_mod1 <- generer_donnees_graphique(ps_es1, "Model police_share")
+donnees_mod2 <- generer_donnees_graphique(cs_es1, "Model correction_share")
+
+
+plot_data_final <- bind_rows(donnees_mod1, donnees_mod2)
+
+plot_data_final$city_class <- factor(plot_data_final$city_class, 
+                                     levels = c("less than 100k", 
+                                                "100k to 249k", 
+                                                "250k and more"))
+
+graphique_es <- ggplot(plot_data_final, aes(x = time, y = estimate, color = city_class, shape = city_class)) +
+  geom_hline(yintercept = 0, linetype = "solid", color = "black", size = 0.5) +
+  geom_vline(xintercept = -0.5, linetype = "dashed", color = "red", size = 0.8) +
+  
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, position = position_dodge(0.4)) +
+  geom_line(aes(group = city_class), position = position_dodge(0.4), size = 1) +
+  geom_point(position = position_dodge(0.4), size = 3) +
+  
+  facet_wrap(~ modele, ncol = 2) +
+  
+  scale_x_continuous(breaks = c(-3, -2, -1, 0, 1, 2), labels = c("T-3", "T-2", "T-1", "T=0", "T+1", "T+2")) +
+  labs(
+    x = "Time relative to legalization",
+    y = "Estimated effect on the budget share",
+    color = "Class by city",
+    shape = "Class by city"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 12),
+    panel.grid.minor = element_blank()
+  )
+
+print(graphique_es)
+```
+
+[**To go futher :**]{.underline}
+
+**Callaway & Sant'Anna estimator (2021)**
+
+This method corrects the previous bias by grouping cities by year of legalization to calculate the effect of the law step by step. It ensures that cities that adopt the law are only compared to cities that have not yet legalized or will never legalize. This provides a much more accurate and pure assessment of budgetary changes.
+
+**Chaisemartin & D'Haultfœuille estimator (2020)**
+
+The classic model handles law repeals very poorly and generates “negative weights” that completely skew the calculation if a state abandons recreational cannabis. This alternative estimator solves this problem by measuring the impact exactly when the status changes, without being polluted by previous years. This allows cities with unstable trajectories to be included without destroying the validity of the overall results.
+
+```{r}
+sink()
+```
