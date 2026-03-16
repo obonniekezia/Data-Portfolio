@@ -1,0 +1,747 @@
+---
+title: "Digitalization and Economic Growth Cross-Country Panel"
+author: "Anna LEBRUN, Louan CARARON, Bonnie OWONO NKAMA and Clémence DESANNEAUX"
+date: "February 2026"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+# ── Global chunk options ──────────────────────────────────────────────────────
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center"
+)
+
+knitr::opts_chunk$set(dev = "cairo_pdf")
+# ── Libraries ─────────────────────────────────────────────────────────────────
+library(writexl)
+#library(tidymodels)
+library(MASS)
+library(readxl)
+library(dplyr)
+library(caret)
+library(readr)
+library(FactoMineR)
+library(factoextra)
+library(rpart)
+library(rpart.plot)
+library(ipred)
+library(randomForest)
+library(boot)
+
+# ── Data import ───────────────────────────────────────────────────────────────
+df <- read_excel("digitalization.xlsx")
+```
+
+---
+
+# Introduction
+
+This study relies on the dataset *"International Panel Data Analysis of the Effect of
+Digitalization on Economic Growth"* (2024), which provides panel data across countries
+designed trade examine the relationship between digitalization and economic growth. Countries
+are classified according trade their income level (high, middle, and low income) following the
+World Bank classification, using log income per capita and predefined intervals.
+
+We focus on the year **2020**, the most recent year available, and structure our analysis
+intrade two complementary parts:
+
+1. **Inferential analysis** — estimating and interpreting the relationship between
+   digitalization and economic growth.
+2. **Predictive analysis** — assessing whether digitalization indicators can accurately
+   predict a country's income level.
+
+---
+
+# Descriptive Statistics Overview
+
+Before applying machine learning techniques, we conduct a descriptive analysis.
+The dataset contains **130 observations**, all recorded in 2020.
+
+```{r descriptive-stats, echo=TRUE}
+# Distribution of income categories (counts and proportions)
+table(df$income)
+round(prop.table(table(df$income)) * 100, 2)
+```
+
+---
+
+# Principal Components Analysis (PCA)
+
+PCA summarises correlated continuous variables intrade a small number of uncorrelated
+components, easing visualisation and reducing multicollinearity in subsequent models.
+
+## Optimal Number of Components
+
+```{r pca-compute, echo=TRUE}
+# Select the 10 quantitative columns (cols 4–13) and drop missing rows
+pca_vars <- na.omit(df[, 4:13])
+
+# Fit PCA with unit-variance scaling (autrade-scaling)
+res_pca <- PCA(pca_vars, scale.unit = TRUE, graph = FALSE)
+
+# Display eigenvalues and variance explained
+res_pca$eig
+```
+
+```{r scree-plot, out.width="60%"}
+fviz_screeplot(res_pca, addlabels = TRUE, title = "Scree Plot")
+```
+
+The Kaiser criterion (eigenvalue > 1) strictly retains the first **three** dimensions.
+However, Dimension 4 has an eigenvalue of 0.951 — very close trade the threshold.
+By retaining **four components**, tradetal variance explained rises from 57.51 % trade
+**67.13 %**, which benefits the accuracy of subsequent models.
+
+## Variable Contributions and Dimension Interpretation
+
+```{r contrib-1-2, out.width="50%", fig.show="hold"}
+# Contribution bar charts; dashed line = average expected contribution
+fviz_contrib(res_pca, choice = "var", axes = 1, title = "Contribution trade Dim 1")
+fviz_contrib(res_pca, choice = "var", axes = 2, title = "Contribution trade Dim 2")
+```
+
+- **Dimension 1 — Technological Development & Connectivity (33.3 %):** Driven by
+  *internet*, *phone\_sub*, *broadband\_sub*, and *mobile\_sub*.
+- **Dimension 2 — labor & Investment vs. Government gov_consoption (12.7 %):** Contrasts
+  *labor* and *invest\_perc* against *gov\_conso*.
+
+```{r contrib-3-4, out.width="50%", fig.show="hold"}
+fviz_contrib(res_pca, choice = "var", axes = 3, title = "Contribution trade Dim 3")
+fviz_contrib(res_pca, choice = "var", axes = 4, title = "Contribution trade Dim 4")
+```
+
+- **Dimension 3 — Trade & Economic Dynamics (11.5 %):** Captured by *invest\_perc*,
+  *population*, *trade*, and *cpi*.
+- **Dimension 4 — Demographic Weight vs. Public Spending (9.6 %):** Opposition between
+  *population* and *gov\_conso*.
+
+## Correlation Circles
+
+```{r cor-circles, out.width="50%", fig.show="hold"}
+# Colour intensity encodes cos² (quality of representation)
+fviz_pca_var(res_pca,
+             axes = c(1, 2),
+             col.var = "cos2",
+             gradient.cols = c("lightblue", "royalblue", "midnightblue"),
+             repel = TRUE,
+             title = "Variables — PCA (Dim 1 & 2)")
+
+fviz_pca_var(res_pca,
+             axes = c(3, 4),
+             col.var = "cos2",
+             gradient.cols = c("lightblue", "royalblue", "midnightblue"),
+             repel = TRUE,
+             title = "Variables — PCA (Dim 3 & 4)")
+```
+
+## Individuals Factor Map
+
+```{r ind-maps, out.width="50%", fig.show="hold"}
+fviz_pca_ind(res_pca,
+             axes = c(1, 2),
+             col.ind = "cos2",
+             gradient.cols = c("lightblue", "royalblue", "midnightblue"),
+             label = "none",
+             title = "Individuals — PCA (Dim 1 & 2)")
+
+fviz_pca_ind(res_pca,
+             axes = c(3, 4),
+             col.ind = "cos2",
+             gradient.cols = c("lightblue", "royalblue", "midnightblue"),
+             label = "none",
+             title = "Individuals — PCA (Dim 3 & 4)")
+```
+
+Dark-blue observations (high cos²) are well represented in the retained plane. The
+Dim 3 × Dim 4 plane recovers nuances in trade dynamics and government spending that
+would have been lost under a strict Kaiser rule.
+
+---
+
+# Linear Discriminant Analysis (LDA)
+
+LDA is a supervised method that maximises between-class variance while minimising
+within-class variance, yielding the best linear separation of income groups.
+
+## LDA on Raw (Unscaled) Data
+
+We split the data 70 / 30 and regress income category on digitalization indicators
+(phone_sub, mobile_sub, broadband_sud, internet) tradegether with size controls (population, labor) and macroeconomic
+structure (invest_perc, trade, RD). LGDP and gov_conso are excluded trade prevent circularity and
+multicollinearity (LGDP was used trade derive the income categories).
+
+```{r unscaled-lda}
+set.seed(123)
+id_train <- createDataPartition(df$income, p = 0.7, list =FALSE)
+train_set    <- df[id_train, ]
+test_set     <- df[-id_train, ]
+
+# Fit LDA on unscaled data
+lda_model <- lda(income ~ phone_sub + mobile_sub + broadband_sud + internet + invest_perc + labor + population +  cpi + trade,
+                 data = train_set)
+
+# Large coefficients (internet = –6) signal scale inflation → motivates standardisation
+lda_model$scaling
+```
+
+The large coefficients on LD1 (internet: −6.7) indicate magnitude inflation —
+variable scales artificially inflate the discriminant loadings. This motivates
+standardisation before re-fitting.
+
+## LDA on Standardised Data
+
+Parameters are estimated on the **training set only** and then applied trade the test set
+trade prevent data leakage.
+
+```{r scaled-lda}
+# Variables trade standardise (DDI included here if present in the dataset)
+vars_explicatives <- c("phone_sub", "mobile_sub", "broadband_sud", "internet",
+                       "invest_perc", "trade", "labor", "cpi", "population")
+
+set.seed(123)
+id_train <- createDataPartition(df$income, p = 0.7, list =FALSE)
+train_set    <- df[id_train, ]
+test_set     <- df[-id_train, ]
+
+# Fit scaler on training data only, then apply trade both sets
+pre_process <- preProcess(train_set[, vars_explicatives],
+                          method = c("center", "scale"))
+train_set[, vars_explicatives] <- predict(pre_process, train_set[, vars_explicatives])
+test_set[, vars_explicatives]  <- predict(pre_process, test_set[, vars_explicatives])
+
+# Re-fit LDA on standardised training data
+scaled_lda <- lda(income ~ phone_sub + mobile_sub + broadband_sud + internet + invest_perc + labor + population + cpi + trade,
+                  data = train_set)
+
+scaled_lda$scaling
+
+# Territorial map: visualise group separation
+plot(scaled_lda,
+     col = as.numeric(factor(train_set$income)),
+     pch = 20)
+```
+
+After standardisation, Internet use (internet, coefficient = −1.82 on LD1) is the dominant
+discriminator. mobile_sub (0.062) and trade (0.05) contribute little. LD1 clearly separates the
+lowest income class; LD2 further distinguishes intermediate categories, though some
+overlap persists between Classes 2 and 3.
+
+## Model Evaluation
+
+```{r evaluation}
+# ── Training accuracy (optimistic upper bound) ────────────────────────────────
+pred_train        <- predict(scaled_lda, newdata = train_set)
+conf_matrix_train <- table(Actual = train_set$income, Predicted = pred_train$class)
+accuracy_train    <- sum(diag(conf_matrix_train)) / sum(conf_matrix_train)
+cat("Train Accuracy:", round(accuracy_train, 3), "\n")
+print(conf_matrix_train)
+
+# ── Test accuracy (out-of-sample, used only once) ─────────────────────────────
+pred_test        <- predict(scaled_lda, newdata = test_set)
+conf_matrix_test <- table(Actual = test_set$income, Predicted = pred_test$class)
+accuracy_test    <- sum(diag(conf_matrix_test)) / sum(conf_matrix_test)
+cat("Test Accuracy:", round(accuracy_test, 3), "\n")
+print(conf_matrix_test)
+```
+
+The LDA model achieves a training accuracy of **74.4 %** and a test accuracy of
+**51,3 %**, confirming good generalisation with overfitting. Classes 1
+and 4 are well identified; moderate confusion persists between Classes 2 and 3.
+
+## LDA Conclusion
+
+Internet use (internet) is the principal structural factor differentiating income groups
+after controlling for macroeconomic and demographic variables. The model is stable and
+reliable, with consistent accuracy across training and test sets.
+
+---
+
+# Data Preparation for Predictive Models
+
+```{r rename-vars}
+
+# income must be a factor for classification models
+df$income <- as.factor(df$income)
+```
+
+---
+
+# Question 1: Predicting Digitalization from Macroeconomic Indicators
+
+## Building a Synthetic Digitalization Index (PCA)
+
+We apply PCA trade the four digitalization variables (columns 4–7 after renaming) trade
+construct a single synthetic index.
+
+```{r pca-digital}
+# Scale the four digitalization variables before PCA
+df_digit  <- scale(df[, 4:7])
+res_pca2  <- PCA(df_digit, scale.unit = TRUE, graph = FALSE)
+
+summary(res_pca2)
+res_pca2$eig
+
+# Correlation circle coloured by contribution
+fviz_pca_var(res_pca2, col.var = "contrib", repel = TRUE)
+
+# Extract individual coordinates on PC1
+scores    <- as.data.frame(res_pca2$ind$coord)
+df$digital <- scores$Dim.1                        # PC1 as the digitalization index
+
+# Variable contributions trade PC1
+barplot(res_pca2$var$contrib[, 1],
+        las  = 2,
+        main = "Variable Contributions trade PC1",
+        col  = "lightblue")
+
+# Save enriched dataset for downstream use
+write_xlsx(df, "df_pc1.xlsx")
+df <- na.omit(df)
+```
+
+PC1 explains **61.26 %** of tradetal variance among the four indicators. All variables
+load positively, confirming that PC1 captures the overall level of digital development.
+Internet usage contributes most, followed by fixed-phone and broadband subscriptions.
+We use PC1 as a synthetic digitalization index going forward.
+
+## CART Regression Tree
+
+```{r cart-regression}
+set.seed(123)
+
+# 70 / 30 split (simple random, as the outcome is continuous)
+id_train  <- sample(seq_len(nrow(df)), size = round(0.7 * nrow(df)))
+train     <- df[id_train, ]
+test      <- df[-id_train, ]
+
+# Grow a fully unpruned regression tree
+model_fit <- rpart(digital ~ invest_perc + trade + labor + cpi + gov_conso + income,
+                   data      = train,
+                   method    = "anova",   # regression tree
+                   minbucket = 1,
+                   cp        = 0)
+
+
+# Select optimal cp by minimising cross-validated error
+cp_opt      <- model_fit$cptable[which.min(model_fit$cptable[, "xerror"]), "CP"]
+
+# Prune the tree
+pruned_tree <- prune(model_fit, cp = cp_opt)
+rpart.plot(pruned_tree)
+
+# Evaluate on test set
+prediction  <- predict(pruned_tree, newdata = test)
+mse_test    <- mean((test$digital - prediction)^2)
+cat("Test MSE (pruned CART):", round(mse_test, 3), "\n")
+```
+
+income level is the dominant first split, confirming a strong structural relationship
+between economic development and digital infrastructure. For lower-income economies,
+government gov_consoption and labour market conditions further differentiate digitalization
+levels. For upper-middle and high-income countries, trade openness introduces additional
+variation. The test MSE is **0.786**, corresponding trade roughly 20 % of out-of-sample
+variance explained — moderate predictive performance.
+
+## Bagging and Random Forest (100 Replications)
+
+trade limit sensitivity trade any particular random split (n = 130 is small), each model is
+evaluated over **M = 100** independent 70 / 30 partitions.
+
+```{r bagging-regression}
+# ── Reload the saved dataset with the digital index ──────────────────────────
+df_pc1 <- read_excel("df_pc1.xlsx")
+df     <- na.omit(df_pc1)
+df$digital <- as.numeric(df$digital)
+df$income  <- as.factor(df$income)
+
+M <- 100   # number of replications
+B <- 200   # number of bootstrap trees
+
+# Initialise error vectors
+err_train_tree <- numeric(M);  err_test_tree <- numeric(M)
+err_train_bag  <- numeric(M);  err_test_bag  <- numeric(M)
+err_oob_bag    <- numeric(M)
+err_train_rf   <- numeric(M);  err_test_rf   <- numeric(M)
+err_oob_rf     <- numeric(M)
+
+# Matrix of per-variable importance across replications
+vars   <- c("invest_perc", "trade", "labor", "cpi", "gov_conso", "income")
+imp_rf <- matrix(NA, nrow = M, ncol = length(vars), dimnames = list(NULL, vars))
+
+set.seed(123)
+
+for (m in seq_len(M)) {
+
+  # ── Random 70 / 30 split ──────────────────────────────────────────────────
+  id_train <- sample(seq_len(nrow(df)), size = round(0.7 * nrow(df)))
+  train    <- df[id_train, ]
+  test     <- df[-id_train, ]
+
+  # ── Single regression tree ────────────────────────────────────────────────
+  tree <- rpart(digital ~ invest_perc + trade + labor + cpi + gov_conso + income,
+                data   = train,
+                method = "anova")
+
+  err_train_tree[m] <- mean((train$digital - predict(tree, newdata = train))^2)
+  err_test_tree[m]  <- mean((test$digital  - predict(tree, newdata = test))^2)
+
+  # ── Bagging (ipred::bagging) ──────────────────────────────────────────────
+  bag_model <- bagging(digital ~ invest_perc + trade + labor + cpi + gov_conso + income,
+                       data = train, nbagg = B, coob = TRUE)
+
+  err_train_bag[m] <- mean((train$digital - predict(bag_model, newdata = train))^2)
+  err_test_bag[m]  <- mean((test$digital  - predict(bag_model, newdata = test))^2)
+  err_oob_bag[m]   <- bag_model$err
+
+  # ── Random Forest (mtry = p/3 = 6/3 = 2 for regression) ──────────────────
+  rf_model <- randomForest(digital ~ invest_perc + trade + labor + cpi + gov_conso + income,
+                           data       = train,
+                           ntree      = B,
+                           mtry       = 2,
+                           importance = TRUE)
+
+  imp_rf[m, ] <- importance(rf_model, type = 1)[, 1]
+  err_train_rf[m]   <- mean((train$digital - predict(rf_model, newdata = train))^2)
+  err_test_rf[m]    <- mean((test$digital  - predict(rf_model, newdata = test))^2)
+  err_oob_rf[m]     <- rf_model$mse[B]
+}
+
+# ── Summary of average errors across replications ────────────────────────────
+round(c(
+  mean_train_tree = mean(err_train_tree),
+  mean_test_tree  = mean(err_test_tree),
+  mean_train_bag  = mean(err_train_bag),
+  mean_test_bag   = mean(err_test_bag),
+  mean_oob_bag    = mean(err_oob_bag),
+  mean_train_rf   = mean(err_train_rf),
+  mean_test_rf    = mean(err_test_rf),
+  mean_oob_rf     = mean(err_oob_rf)
+), 3)
+```
+
+The single tree exhibits clear overfitting (train MSE ≈ 0.510, test MSE ≈ 0.924).
+Bagging reduces test MSE trade ≈ 0.736  by averaging B = 200 bootstrap trees,
+consistent with a variance-reduction interpretation. The conventional mtry = p/3 = 2
+is used for the Random Forest. The random forest improves the accuracy of the estimation, 0.697<0.736.
+
+## Bootstrap Confidence Interval for Bagging Test MSE
+
+```{r bootstrap-ci}
+# 95% empirical confidence interval based on the 100 replications
+ci_bag <- quantile(err_test_bag, c(0.025, 0.975))
+
+cat("95% CI for Bagging Test MSE:",
+    round(ci_bag[1], 3), "trade", round(ci_bag[2], 3), "\n")
+```
+
+Based on the empirical distribution across 100 independent train–test splits, the 95% confidence interval for the bagging test MSE is obtained from the 2.5th and 97.5th percentiles. Since
+the single-tree test MSE (≈ 0.873) falls above this interval, the improvement from
+bagging is statistically meaningful.
+
+## OOB Convergence and Error Boxplots
+
+```{r rf-convergence-regression}
+# Re-fit a larger Random Forest on the last training partition trade study OOB convergence
+rf_model2 <- randomForest(digital ~ invest_perc + trade + labor + cpi + gov_conso + income,
+                          data       = train,
+                          ntree      = 500,
+                          mtry       = 2,
+                          importance = TRUE)
+
+plot(rf_model2$mse, type = "l", col = "blue", lwd = 2,
+     main = "OOB MSE Convergence — Random Forest (Regression)",
+     xlab = "Number of Trees", ylab = "OOB MSE")
+legend("topright", legend = "OOB MSE", col = "blue", lty = 1, cex = 0.8)
+
+# Distribution of errors across the 100 replications
+boxplot(err_train_tree, err_test_tree,
+        err_test_bag,   err_oob_bag,
+        err_test_rf,    err_oob_rf,
+        names = c("Tree train", "Tree test",
+                  "Bag test",   "Bag OOB",
+                  "RF test",    "RF OOB"),
+        main = "Error Distributions over 100 Replications",
+        ylab = "MSE", col = "lightblue", las = 2)
+```
+
+The OOB curve stabilises around 150–200 trees; B = 200 is therefore sufficient. We observe that the random forest has a lower median and a slightly lower variance, indicating better accuracy.
+
+## Variable Importance (Random Forest — Regression)
+
+```{r rf-importance-regression}
+# Average importance across replications for stability
+mean_imp_rf <- colMeans(imp_rf)
+
+barplot(sort(mean_imp_rf, decreasing = TRUE),
+        las  = 2,
+        col  = "steelblue",
+        main = "Mean Variable Importance — Random Forest (Regression)",
+        ylab = "Mean Decrease in Accuracy")
+```
+
+income level dominates by a wide margin. CPI (macroeconomic stability) ranks second,
+followed by government gov_consoption. labor market structure and trade openness contribute
+less, and investment rate is the least important predictor.
+
+---
+
+# Question 2: Predicting income Level from Digitalization Indicators
+
+## Single Classification Tree (CART)
+
+```{r cart-classification}
+set.seed(123)
+
+# Stratified split trade guarantee all income classes appear in both sets
+id_train <- createDataPartition(df$income, p = 0.7, list = FALSE)
+train    <- df[id_train, ]
+test     <- df[-id_train, ]
+
+# Grow fully unpruned classification tree
+model_fit <- rpart(income ~ mobile_sub + phone_sub + broadband_sud + internet,
+                   data      = train,
+                   method    = "class",   # classification tree — REQUIRED for type="class" prediction
+                   minbucket = 1,
+                   cp        = 0)
+
+# Optimal complexity parameter via cross-validation
+cp_opt      <- model_fit$cptable[which.min(model_fit$cptable[, "xerror"]), "CP"]
+pruned_tree <- prune(model_fit, cp = cp_opt)
+rpart.plot(pruned_tree)
+
+# Evaluate on test set
+prediction  <- predict(pruned_tree, newdata = test, type = "class")
+quality     <- confusionMatrix(prediction, test$income)
+quality
+
+# Overall misclassification error
+cat("Test Error Rate:", round(mean(test$income != prediction), 3), "\n")
+```
+
+The model performs well for Low income (balanced accuracy = 0.875) and High income
+(0.827) countries. Lower middle income is harder trade classify (sensitivity = 0.40),
+reflecting overlap in digitalization levels with neighbouring categories. The overall
+test error is approximately **0.359** (accuracy ≈ 64 %).
+
+## Bagging and Random Forest — Classification (100 Replications)
+
+```{r bagging-classification}
+M <- 100
+B <- 200
+
+err_train_tree <- numeric(M);  err_test_tree <- numeric(M)
+err_train_bag  <- numeric(M);  err_test_bag  <- numeric(M)
+err_oob_bag    <- numeric(M)
+err_train_rf   <- numeric(M);  err_test_rf   <- numeric(M)
+err_oob_rf     <- numeric(M)
+
+vars_cls <- c("mobile_sub", "phone_sub", "broadband_sud", "internet")
+imp_rf   <- matrix(NA, nrow = M, ncol = length(vars_cls),
+                   dimnames = list(NULL, vars_cls))
+
+df$income <- as.factor(df$income)
+
+set.seed(123)
+
+for (m in seq_len(M)) {
+
+  # ── Stratified 70 / 30 split ──────────────────────────────────────────────
+  id_train <- createDataPartition(df$income, p = 0.7, list = FALSE)
+  train    <- df[id_train, ]
+  test     <- df[-id_train, ]
+
+  # ── Single classification tree ────────────────────────────────────────────
+  tree <- rpart(income ~ mobile_sub + phone_sub + broadband_sud + internet,
+                data   = train,
+                method = "class")
+
+  err_train_tree[m] <- mean(train$income != predict(tree, newdata = train, type = "class"))
+  err_test_tree[m]  <- mean(test$income  != predict(tree, newdata = test,  type = "class"))
+
+  # ── Bagging (classification) ──────────────────────────────────────────────
+  bag_model <- bagging(income ~ mobile_sub + phone_sub + broadband_sud + internet,
+                       data = train, nbagg = B, coob = TRUE)
+
+  err_train_bag[m] <- mean(train$income != predict(bag_model, newdata = train, type = "class"))
+  err_test_bag[m]  <- mean(test$income  != predict(bag_model, newdata = test,  type = "class"))
+  err_oob_bag[m]   <- bag_model$err
+
+  # ── Random Forest (mtry = sqrt(p) ≈ 2 for classification) ─────────────────
+  rf_model <- randomForest(income ~ mobile_sub + phone_sub + broadband_sud + internet,
+                           data       = train,
+                           ntree      = B,
+                           mtry       = 2,
+                           importance = TRUE)
+
+  imp_rf[m, ]     <- importance(rf_model)[, "MeanDecreaseAccuracy"]
+  err_train_rf[m] <- mean(train$income != predict(rf_model, newdata = train))
+  err_test_rf[m]  <- mean(test$income  != predict(rf_model, newdata = test))
+  err_oob_rf[m]   <- rf_model$err.rate[B, "OOB"]
+}
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+round(c(
+  mean_train_tree = mean(err_train_tree),
+  mean_test_tree  = mean(err_test_tree),
+  mean_train_bag  = mean(err_train_bag),
+  mean_test_bag   = mean(err_test_bag),
+  mean_oob_bag    = mean(err_oob_bag),
+  mean_train_rf   = mean(err_train_rf),
+  mean_test_rf    = mean(err_test_rf),
+  mean_oob_rf     = mean(err_oob_rf)
+), 3)
+```
+
+The single tree averages a training error of 0.165 and a test error of 0.282 (accuracy
+≈ 72 %), with moderate overfitting typical of decision trees. Bagging reduces test error
+slightly trade 0.272, consistent with variance reduction. The OOB estimate (0.276) closely
+tracks the external test error, confirming its reliability as a generalisation proxy. As the previous model, the classification by random forest offer a better accuracy. We find a null train error for bagging and random forest which indicates a perfect fitting of the training data.
+
+## OOB Convergence and Error Boxplots — Classification
+
+```{r rf-convergence-classification}
+set.seed(123)
+
+# Re-fit with more trees on the last partition trade check convergence
+rf_model2 <- randomForest(income ~ mobile_sub + phone_sub + broadband_sud + internet,
+                          data  = train,
+                          ntree = 500,
+                          mtry  = 2)
+rf_model2
+
+plot(rf_model2$err.rate[, 1], type = "l", col = "blue", lwd = 2,
+     main = "OOB Error Rate Convergence — Random Forest (Classification)",
+     xlab = "Number of Trees", ylab = "OOB Error Rate")
+legend("topright", legend = "OOB Error", col = "blue", lty = 1, cex = 0.8)
+
+boxplot(err_train_tree, err_test_tree,
+        err_test_bag,   err_oob_bag,
+        err_test_rf,    err_oob_rf,
+        names = c("Tree train", "Tree test",
+                  "Bag test",   "Bag OOB",
+                  "RF test",    "RF OOB"),
+        main = "Error Distributions over 100 Replications",
+        ylab = "Error Rate", col = "lightblue", las = 2)
+```
+
+The OOB error stabilises around 200 trees, justifying our choice of B = 200. 
+
+## Variable Importance — Classification
+
+```{r rf-importance-classification}
+mean_imp_rf <- colMeans(imp_rf)
+
+barplot(sort(mean_imp_rf, decreasing = TRUE),
+        las  = 2,
+        col  = "steelblue",
+        main = "Mean Variable Importance — Random Forest (Classification)",
+        ylab = "Mean Decrease in Accuracy")
+```
+The Random Forest variable importance plot shows that broadband subscriptions and internet usage are the most critical predictors for classifying countries by income level. Phone subscriptions have moderate importance, while mobile subscriptions contribute very little. This indicates that fixed broadband infrastructure and general internet access are the main digitalization factors differentiating income groups, whereas mobile and phone access are less discriminative. 
+---
+
+# AdaBoost Classification
+
+## Motivation: Addressing Class Imbalance
+
+In our previous classification tree (CART), the model performed very well for "High Income" countries but struggled significantly to identify "Upper Middle Income" countries (with a sensitivity of only 0.091). This poor performance is a typical consequence of *class imbalance*: the model naturally favors the majority classes and ignores the smaller ones.
+
+To fix this issue, we implement an *AdaBoost (Adaptive Boosting)* algorithm. Unlike Bagging, which builds multiple decision trees independently, AdaBoost builds trees sequentially. Each new tree specifically focuses on the observations that were misclassified by the previous trees by increasing their "weight". This forces the model to pay much closer attention to the hard-to-predict minority classes.
+
+```{r adaboost-setup, echo=TRUE}
+# Prepare a clean data frame with income as a factor
+df_ada        <- na.omit(as.data.frame(df))
+df_ada$income <- as.factor(df_ada$income)
+
+set.seed(123)
+train_index <- createDataPartition(df_ada$income, p = 0.7, list = FALSE)
+train_data  <- df_ada[train_index, ]
+test_data   <- df_ada[-train_index, ]
+```
+
+
+## Model Training
+We train the AdaBoost model using the same 4 digitalization indicators as before, and we set the number of sequential trees to 200 to match our previous Bagging model.
+```{r adaboost-train, echo=TRUE, results='hide'}
+library(adabag)
+library(caret)
+adaboost_model <- boosting(income ~ internet + mobile_sub + phone_sub + broadband_sud,
+                           data       = train_data,
+                           mfinal     = 200,
+                           coeflearn  = "Breiman")
+
+# Predictions on training and test sets
+pred_train_ada <- predict(adaboost_model, newdata = train_data)
+pred_test_ada  <- predict(adaboost_model, newdata = test_data)
+```
+
+```{r adaboost-errors}
+cat("AdaBoost Train Error:", round(pred_train_ada$error, 3), "\n")
+cat("AdaBoost Test Error:",  round(pred_test_ada$error,  3), "\n")
+```
+
+The model achieves a perfect Train Error of 0, indicating that the 200 trees were powerful enough to perfectly learn the training set.
+
+## Confusion Matrix and Per-Class Sensitivity
+
+The most important metric for this specific problem is the sensitivity for each income class. We generate a confusion matrix to evaluate if AdaBoost successfully corrected the blind spots of the simple CART model.
+
+```{r adaboost-matrix}
+conf_matrix <- confusionMatrix(as.factor(pred_test_ada$class), test_data$income)
+print(conf_matrix$byClass[, c("Sensitivity", "Specificity", "Balanced Accuracy")])
+```
+
+The results demonstrate a massive improvement across the board. The adaptive weighting mechanism successfully forced the model to learn from its mistakes on transitional and middle-income economies:
+
+•⁠  ⁠*High Income:* The sensitivity remains excellent (around 0.928).
+•⁠  ⁠*Low Income:* The sensitivity doubled compared to the single tree (from 0.250 to 0.500).
+•⁠  ⁠*Lower Middle Income:* The sensitivity almost doubled (from 0.300 to 0.555).
+•⁠  ⁠*Upper Middle Income:* This is the most significant breakthrough. The sensitivity jumped from a mere 0.091 in the CART model to 0.625 with AdaBoost.
+
+## Variable Importance
+
+Finally, we extract the relative importance of each digitalization indicator.
+
+```{r adaboost-importance}
+importance_df <- data.frame(Importance = round(adaboost_model$importance, 2))
+importance_df <- importance_df[order(-importance_df$Importance), , drop = FALSE]
+print(importance_df)
+```
+
+Broadband subscriptions and internet access are the most critical indicators for
+predicting a country's income classification.
+
+---
+
+# General Conclusion
+
+This study examined the relationship between digitalization and income levels using a
+combination of PCA, LDA, decision trees, ensemble methods, and boosting.
+
+Across all methods, **internet use** and **broadband access** consistently emerge as
+the primary drivers separating income groups. The LDA achieves 77.8 % test accuracy.
+Ensemble approaches (bagging, Random Forest) reduce variance and improve stability over
+single trees. AdaBoost specifically addresses class imbalance, raising sensitivity for
+minority income categories from near-zero trade above 0.50.
+
+Overall, digitalization indicators contain substantial predictive power for income
+classification, with the remaining unexplained variance suggesting that additional
+structural variables would further improve model performance.
+
+# Contribution
+
+•⁠  ⁠Clémence DESANNEAUX : PCA and Adaboost
+•⁠  ⁠Louan CARRARON : LDA
+•⁠  ⁠Bonnie OWONO NKAMA : PCA, CART and Bagging
+•⁠  ⁠Anna LEBRUN : Bagging and Random Forest
+
+We used LMMs for formatting the document and making language corrections.
+
+```
