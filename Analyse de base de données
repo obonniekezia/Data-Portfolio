@@ -1,0 +1,142 @@
+Members(id_member (PK), first_name, last_name, email)
+
+Instructors(id_instructor (PK), first_name, last_name, email, description)
+
+Rooms(id_room (PK), room_type, capacity)
+
+Classes(id_class (PK), activity_name, duration_min, id_instructor (FK → Instructors))
+
+Sessions(id_session (PK), id_class (FK → Classes), id_room (FK → Rooms), start_time, end_time)
+
+Enrollment(id_member (FK → Members), (id_class FK → Classes))
+PK: (id_member, id_class)
+
+Attendance(id_member (FK → Members), id_session (FK → Sessions))
+PK: (id_member, id_session)
+CREATE TABLE Members ( 
+id_member INT PRIMARY KEY, 
+first_name VARCHAR(50) NOT NULL,
+last_name VARCHAR(50) NOT NULL, 
+email VARCHAR(100) UNIQUE
+ );
+
+CREATE TABLE Instructors( 
+id_instructor INT PRIMARY KEY, 
+first_name VARCHAR(50) NOT NULL,
+last_name VARCHAR(50) NOT NULL, 
+email VARCHAR(100) UNIQUE, 
+description VARCHAR(100)
+ );
+CREATE TABLE Rooms( 
+id_room INT PRIMARY KEY, 
+room_type VARCHAR(50),
+capacity INT NOT NULL CHECK (capacity > 0)
+);
+
+CREATE TABLE Classes(
+id_class INT PRIMARY KEY,
+activity_name VARCHAR(100) NOT NULL,
+Duration_min INT NOT NULL,
+id_instructor INT NOT NULL, 
+FOREIGN KEY (id_instructor) REFERENCES Instructors(id_instructor) 
+);
+
+
+CREATE TABLE Sessions ( 
+id_session INT PRIMARY KEY,
+id_class INT NOT NULL, 
+id_room INT NOT NULL, 
+start_time DATETIME NOT NULL, 
+end_time DATETIME NOT NULL, 
+CHECK (end_time > start_time),
+FOREIGN KEY (id_class) REFERENCES Classes(id_class), 
+FOREIGN KEY (id_room) REFERENCES Rooms(id_room)
+ );
+
+
+
+CREATE TABLE Enrollment ( 
+id_member INT NOT NULL,
+id_class INT NOT NULL, 
+PRIMARY KEY (id_member, id_class), 
+FOREIGN KEY (id_member) REFERENCES Members(id_member), 
+FOREIGN KEY (id_class) REFERENCES Classes(id_class) 
+); 
+
+CREATE TABLE Attendance (
+id_member INT NOT NULL, 
+id_session INT NOT NULL, 
+PRIMARY KEY (id_member, id_session), 
+FOREIGN KEY (id_member) REFERENCES Members(id_member), 
+FOREIGN KEY (id_session) REFERENCES Sessions(id_session) 
+);
+Part 6- SQL Queries
+
+1 .  List all members enrolled in a given class.
+
+SELECT m.first_name, m.last_name 
+FROM Members as m 
+Inner join Enrollment as e
+On m.id_member = e.id_member
+Where e.id_class = 2; 
+
+2 .  Show all sessions of a specific class including date and instructor.
+
+Select s.id_session, s.start_time, s.end_time,  i.first_name, i.last_name
+From Sessions as s
+Inner Join Classes as c 
+On c.id_class=s.id_class
+Inner join Instructors as i
+On i.id_instructor=c.id_instructor
+Where c.id_class = 2;
+
+
+3.  List the number of members enrolled in each class.
+
+Select e.id_class, count(e.id_member) as total_enrolled
+From Enrollment as e
+Group by (id_class);
+
+4. Find instructors who teach more than one class.
+
+Select i.id_instructor, i.first_name, i.last_name, COUNT(c.id_class) AS number_of_classes
+From Instructors as i
+Inner join Classes as c
+On i.id_instructor = c.id_instructor
+Group by i.id_instructor, i.first_name, i.last_name
+Having   COUNT(c.id_class) > 1 ;
+
+5.  List members who never attended any session.
+
+Select m.id_member, m.first_name, m.last_name
+From Members as m
+Left join Attendance as a
+On a.id_member = m.id_member
+Where a.id_session IS NULL ;
+
+ 
+6. Show the total attendance for each session
+
+Select s.id_session, s.start_time, count(a.id_member) AS total_attendance 
+From Sessions as s 
+Left join Attendance as a 
+On  s.id_session = a.id_session 
+Group by  s.id_session, s.start_time;
+
+Bonus  
+
+Select c.activity_name, count(a.id_member) as total_attendance, i.first_name, i.last_name
+From Classes as c
+
+Inner join Sessions as s
+On c.id_class = s.id_class
+
+Inner join Attendance as a
+On a.id_session = s.id_session
+
+Inner join Instructors as i
+On i.id_instructor=c.id_instructor 
+
+Group by c.id_class, c.activity_name,  i.first_name, i.last_name
+Having count(a.id_member) > 10
+Order by count(a.id_member) desc; 
