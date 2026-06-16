@@ -1,0 +1,1285 @@
+---
+title: "Présentation"
+author: "OWONO Bonnie"
+date: "2026-05-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(httr)
+library(stringr)
+library(ncdf4)
+library(dplyr)
+library(lubridate)
+library(sf)
+library(terra)
+library(ggplot2)
+library(elevatr)
+
+```
+
+# Comparaison des bases de données ERA5 et MERRA-2 sur la région Auvergne-Rhône-Alpes
+
+**Contexte**: Évaluation de la fiabilité des réanalyses climatiques ERA5 et MERRA-2 en vue de justifier le choix de la base de données pour les analyses ultérieures.
+
+**Période d'étude**: 2025 (12 mois complets)
+
+**Région**: Auvergne-Rhône-Alpes et ses alentours (coodonnées: ouest: 2.2°, Sud: 44°, Est: 7.7°, Nord: 47°)
+
+**Variables analysées**: Température, humidité, précipitations
+
+## [1. Présentation des bases de données]{.underline}
+
+### 1.1 MERRA-2
+
+La première source de données météorologiques utilisée dans cette étude est MERRA‑2 (Modern‑Era Retrospective analysis for Research and Applications, version 2), une réanalyse atmosphérique globale de l’ère satellitaire produite par le Global Modeling and Assimilation Office (GMAO) de la NASA. MERRA‑2 est basée sur le modèle GEOS couplé à un système d’assimilation variationnelle qui intègre un grand nombre d’observations in situ et satellitaires, et fournit depuis 1980 des champs horaires sur une grille globale d’environ 0,5° × 0,625°. Elle met à disposition un large ensemble de variables atmosphériques et de surface (température, vents, pression, humidité, précipitations, eau précipitable, etc.) destinées à l’étude des bilans d’eau et d’énergie ainsi qu’à l’analyse du climat récent.
+
+### 1.2 ERA5
+
+La seconde source de données météorologiques utilisée dans ce travail est ERA5, la cinquième génération de réanalyses atmosphériques du Centre européen pour les prévisions météorologiques à moyen terme (CEPMMT / ECMWF), produite dans le cadre du service Copernicus sur le changement climatique (C3S). ERA5 fournit depuis 1940 une réanalyse globale du climat avec des estimations horaires d’un large éventail de variables atmosphériques, de surface et d’océan de vagues, sur une grille d’environ 0,25° et 137 niveaux verticaux de la surface à 80 km. Le système intègre de manière cohérente les observations disponibles dans le modèle de prévision numérique, ce qui permet de reconstruire l’état de l’atmosphère et de proposer en outre des estimations d’incertitude issues d’un ensemble de 10 membres.
+
+### 1.3 Tableau comparatif des caractéristiques techniques
+
+| Caractéristiques | MERRA-2 | ERA-5 |
+|----|----|----|
+| Organisme | NASA (GMAO) | ECMWF |
+| Résolution spatiale | 0,5° × 0,625°(\~60 km) | 0,25° × 0,25° (\~31 km) |
+| Résolution Temporelle | 1h | 1h |
+| Periode disponible | 1940 - présent | 1980 - présent |
+| Methode d'assimilation | 4D-Var | 3D - Var (GEOS-5) |
+| Nombre de points dans la région | 286 | 67 |
+
+### 1.4 Methodes d'assimilation
+
+L’assimilation des données dans MERRA‑2 et ERA5 repose sur la même idée générale : combiner de manière optimale les observations disponibles et un modèle numérique de l’atmosphère pour reconstruire l’état le plus probable de l’atmosphère à chaque instant. Dans MERRA‑2, la NASA utilise le système d’assimilation du modèle GEOS‑5, qui met à jour régulièrement une prévision de fond avec des observations issues de stations au sol, de radiosondages et surtout de nombreux satellites, y compris des radiances hyperspectrales et des observations d’aérosols.
+
+ERA5, produit par l’ECMWF pour le service Copernicus, applique un principe similaire : toutes les 12 heures environ, un schéma de type 4D‑Var combine la prévision du modèle avec les nouvelles observations pour produire une analyse cohérente, puis prolonge cette analyse par une nouvelle prévision, ce cycle étant répété sur l’ensemble de la période 1940–présent.
+
+Dans les deux cas, on parle de « réanalyse » car ce processus d’assimilation est appliqué de façon homogène sur plusieurs décennies, avec des corrections a posteriori et une meilleure prise en compte des observations historiques, afin d’obtenir une base de données climatique longue, cohérente et physiquement consistante.
+
+### 1.5 Littérature
+
+Les études comparant ERA5 et MERRA‑2 montrent que les deux réanalyses fournissent des estimations de température cohérentes, mais avec des performances différentes selon la région étudiée. Kozubek et al. (2020) mettent en évidence une très bonne concordance des champs de température moyens issus d’ERA5 et de MERRA‑2, tout en montrant qu’ERA5 présente moins de discontinuités dans les séries temporelles et des tendances plus homogènes (dû à un résolution effective plus fine entre les points) , ce qui en fait un choix plus robuste pour l’analyse des tendances stratosphériques à long terme. À l’inverse, des évaluations de la température de surface soulignent que les performances relatives dépendent fortement du contexte régional : sur la région Égéenne, Tulger Kara et Elbir en Turquie (2024) trouvent que MERRA‑2 reproduit légèrement mieux la température à 2 m que ERA5 (corrélations R≈0,86–0,96 pour les deux jeux, mais RMSE marginalement plus faible pour MERRA‑2 dans 12 stations sur 19), ce qui suggère un avantage de MERRA‑2 pour certaines applications de climat régional de surface.
+
+À l’échelle de la Chine entière, Huang et al. (2023) concluent au contraire qu’ERA5 est légèrement plus précis que MERRA‑2 pour la température de surface, avec un biais annuel moyen comparable (≈0,4 K) mais un RMSE moyen plus faible (2,04 K pour ERA5 contre 2,66 K pour MERRA‑2). Pris ensemble, ces résultats indiquent que les deux réanalyses sont comparables en termes de qualité de la température, avec un avantage d’ERA5 pour l’homogénéité et la précision moyenne à large échelle, et des performances de MERRA‑2 parfois supérieures pour la température de surface dans certains contextes régionaux spécifiques.
+
+## 2. Extraction des données
+
+### 2.1 Extraction données MERRA-2
+
+```{r,  include=FALSE}
+#======================================#
+# Téléchargement des donnés MERRA-2    #
+#======================================#
+
+
+# Chemin vers ton fichier texte téléchargé
+txt_file <- "C:\\Users\\obonn\\OneDrive\\Documents\\STAGE INSA\\subset_M2T1NXSLV_5.12.4_20260526_112700_.txt"
+
+# Lire toutes les lignes
+lines <- readLines(txt_file)
+
+# Garder uniquement les lignes qui commencent par "https://"
+urls <- lines[grepl("^https://", lines)]
+
+# Optionnel : vérifier
+length(urls)
+#head(urls)
+
+unlink("merra2_T2M_T2MD", recursive = TRUE)
+dir.create("merra2_T2M_T2MD")
+
+download_merra2 <- function(url, destdir = "merra2_T2M_T2MD") {
+  nom_fichier <- str_match(url, "LABEL=([^&]+)")[,2]
+  if (is.na(nom_fichier) || nom_fichier == "") {
+    nom_fichier <- basename(url)
+  }
+  destfile <- file.path(destdir, nom_fichier)
+  
+  if (file.exists(destfile)) {
+    message("Déjà téléchargé : ", nom_fichier)
+    return(destfile)
+  }
+  
+  r <- GET(
+    url,
+    write_disk(destfile, overwrite = TRUE),
+    config(netrc = 1),   # auth Earthdata
+    progress()
+  )
+  
+  if (status_code(r) != 200) {
+    warning("Échec téléchargement : ", nom_fichier,
+            " | code HTTP = ", status_code(r))
+    return(NA)
+  }
+  
+  message("Téléchargé : ", nom_fichier)
+  return(destfile)
+}
+
+fichiers <- sapply(urls, download_merra2, USE.NAMES = FALSE)
+fichiers <- fichiers[!is.na(fichiers)]
+
+# Ne garder que les fichiers NetCDF (.nc ou .nc4)
+fichiers <- fichiers[grepl("\\.nc4?$", fichiers)]
+length(fichiers)
+
+extraire_T2M <- function(fichier, varname = "T2M", varname2 = "T2MDEW", varname3 = "QV2M") {
+  nc <- nc_open(fichier)
+  
+  t2m  <- ncvar_get(nc, varname)
+  t2mdp  <- ncvar_get(nc, varname2)
+  h2m <- ncvar_get(nc, varname3)# dimensions [lon, lat, time]
+  lon  <- ncvar_get(nc, "lon")
+  lat  <- ncvar_get(nc, "lat")
+  time <- ncvar_get(nc, "time")
+  
+  t_units <- ncatt_get(nc, "time", "units")$value
+  nc_close(nc)
+  
+  # Convertir temps MERRA-2 en POSIXct
+  origin_str <- sub(".*since ", "", t_units)
+  origin <- as.POSIXct(origin_str, tz = "UTC")
+  datetimes <- origin + time * 60 # time en heures
+  
+  # Passer en long : une ligne par (lon, lat, datetime)
+  # t2m est [lon, lat, time] → on "déroule" les indices
+  df <- expand.grid(
+    i_lon = seq_along(lon),
+    i_lat = seq_along(lat),
+    i_time = seq_along(time)
+  ) %>%
+    mutate(
+      lon   = lon[i_lon],
+      lat   = lat[i_lat],
+      time  = datetimes[i_time],
+      T2M   = as.vector(t2m)  - 273.15,
+      T2MDEW = as.vector(t2mdp) - 273.15,
+      QV2M = as.vector(h2m)
+    ) %>%
+    select(time, lon, lat, T2M,T2MDEW, QV2M)
+  
+  return(df)
+}
+
+
+liste_df <- lapply(fichiers, extraire_T2M)
+
+df_merra2 <- bind_rows(liste_df)
+
+# Isoler la date 
+df_merra2 <- df_merra2 %>%
+  mutate(
+    date   = as.Date(time),
+    pres_t = 6.112 * exp((17.62*T2M)/(243.12+T2M)),
+    pres_td = 6.112 * exp((17.62*T2MDEW)/(243.12+T2MDEW)),
+    relative_hum = 100 * (pres_td/pres_t),
+    relative_hum = pmin(pmax(relative_hum, 0), 100))
+
+```
+
+La base de données MERRA-2 utilisée dans cette analyse est le produit **M2T1NXSLV** qui réalise des données météorologiques bidimensionnelles moyennées sur une heure, disponibles à des niveaux verticaux couramment utilisés (surface, 2 m, 10 m). Les données sont horodatées au centre de chaque intervalle horaire (par exemple 00:30, 01:30, …, 23:30 UTC). Cette base couvre la période allant de 1980 à aujourd’hui, avec un délai de mise à disposition d’environ trois semaines après la fin de chaque mois. Les données relevées sont la température à 2m, la température de rosée à 2m et l'humidité spécifique.
+
+### 2.1 Extraction données ERA-5
+
+```{r, include=FALSE}
+
+###############################
+#   Données de ERA5           #
+###############################
+
+zip_path  <- "C:\\Users\\obonn\\OneDrive\\Documents\\STAGE INSA\\Le Puy-Loudes\\7b15c38d598d7e594e0a92ef1c691421.zip"
+out_dir <- "~/era5_humid_2025"
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+unzip(zip_path, exdir = out_dir)
+list.files(path.expand(out_dir))
+nc_path <- file.path(out_dir, "data_stream-oper_stepType-instant.nc")
+
+nc <- nc_open(nc_path)
+print(nc)
+names(nc$var)
+
+
+
+era_t2m  <- ncvar_get(nc, "t2m")
+era_t2m_dew  <- ncvar_get(nc, "d2m")
+elon  <- ncvar_get(nc, "longitude")  
+elat  <- ncvar_get(nc, "latitude")   
+time <- ncvar_get(nc, "valid_time")
+
+units_time <- ncatt_get(nc, "valid_time", "units")$value
+
+#verification 
+nc_close(nc)
+
+#conversion en posix
+origin <- as.POSIXct("1970-01-01 00:00:00", tz = "UTC")
+time_posix <- origin + time   
+
+
+# dimensions
+nx <- length(elon)
+ny <- length(elat)
+nt <- length(time)
+
+
+# data.frame long
+idx <- expand.grid(
+  ilon = 1:nx,
+  ilat = 1:ny,
+  it   = 1:nt
+)
+
+df_era5 <- data.frame(
+  lon       = elon[idx$ilon],
+  lat       = elat[idx$ilat],
+  time_index = idx$it,
+  era_t2m     = as.vector(era_t2m)- 273.15,
+  era_t2m_dew     = as.vector(era_t2m_dew)- 273.15
+)
+
+df_era5$datetime <- time_posix[df_era5$time_index]
+
+df_era5 <- df_era5 %>%
+  mutate(date  = as.Date(datetime),
+         pres_t = 6.112 * exp((17.62*era_t2m)/(243.12+era_t2m)),
+         pres_td = 6.112 * exp((17.62*era_t2m_dew)/(243.12+era_t2m_dew)),
+         relative_hum = 100 * (pres_td/pres_t),
+         relative_hum = pmin(pmax(relative_hum, 0), 100))
+
+
+
+```
+
+La base de données **ERA5** utilisée est "*Données horaires ERA5 sur niveaux uniques de 1940 à aujourd’hui*". Elle fournit une estimation cohérente de l’état de l’atmosphère, des surfaces continentales et des vagues océaniques à l’échelle globale depuis 1940 jusqu’à aujourd’hui, en remplaçant la réanalyse ERA-Interim. Le produit ERA5 propose des données horaires pour un grand nombre de variables climatiques (température, vent, pression, précipitations, etc.). Les données sont mises à jour quasi quotidiennement avec un délai d’environ 5 jours, puis consolidées dans une version finale après quelques mois. Les données relevées sont la température à 2m et la température de rosée à 2m.
+
+### 2.3 Comparaison graphique
+
+```{r}
+plot(df_era5$lon, df_era5$lat,
+     xlim = c(2.2, 7.7),
+     ylim = c(44, 47),
+     xlab = "lon",
+     ylab = "lat",
+     pch = 16,
+     col = "lightblue")
+
+# 2) Ajouter le deuxième nuage (par ex. en rouge)
+points(df_merra2$lon, df_merra2$lat,
+       pch = 16,
+       col = "blue")
+
+```
+
+```{r}
+# df_era5 : lon/lat -> sf -> Lambert-93
+df_era5_sf <- df_era5 %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(2154)
+
+df_merra_sf <- df_merra2 %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(2154)
+
+aura_plus <- st_read(
+  "C:/Users/obonn/OneDrive/Documents/STAGE INSA/AURA_L93_50.gpkg"
+)
+aura <- st_read(
+  "C:/Users/obonn/OneDrive/Documents/STAGE INSA/AURA_L93.gpkg"
+)
+
+# AURA en lon/lat pour la requête DEM
+aura_ll  <- st_transform(aura,      4326)
+aura_ll2 <- st_transform(aura_plus, 4326)
+
+dem <- get_elev_raster(
+  locations = aura_ll2,
+  z = 7,
+  clip = "locations"
+)
+
+dem <- rast(dem)                     # SpatRaster
+dem_l93 <- project(dem, "EPSG:2154") # reprojection en Lambert-93
+
+dem_df <- as.data.frame(dem_l93, xy = TRUE)
+names(dem_df) <- c("x", "y", "elev")
+
+ggplot() +
+  # DEM
+  geom_raster(
+    data = dem_df,
+    aes(x = x, y = y, fill = elev)
+  ) +
+  scale_fill_gradientn(
+    colours = c("white", "#238b45", "darkgreen", "#00441b", "black"),
+    name = "Altitude (m)"
+  ) +
+  # Polygones AURA (déjà en 2154)
+  geom_sf(data = aura_plus, fill = NA, color = "black") +
+  geom_sf(data = aura,      fill = NA, color = "black") +
+  # Grille ERA5
+  geom_sf(data = df_era5_sf,
+          shape = 3, size = 1.2, color = "blue") +
+  # Grille MERRA-2
+  geom_sf(data = df_merra_sf,
+          shape = 16, size = 1.2, color = "red") +
+  coord_sf(
+    xlim = st_bbox(aura_plus)[c("xmin", "xmax")],
+    ylim = st_bbox(aura_plus)[c("ymin", "ymax")],
+    expand = FALSE
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Grilles ERA5 et MERRA-2 et stations en AURA",
+    x = NULL, y = NULL
+  )
+```
+
+Cette figure représente l’emplacement de tous les points de grille ERA5 (bleu clair) et de MERRA‑2 (bleu foncé) sur la région d’étude. On observe que les points ERA5 sont plus nombreux et plus rapprochés les uns des autres que les points MERRA‑2, ce qui reflète la résolution plus fine d’ERA5 (pas de 0,25° en latitude/longitude, soit environ 31 km) par rapport à celle de MERRA‑2 (0,5° × 0,625°, soit de l’ordre de 50 à 70 km suivant la latitude). Cette différence d’espacement implique que, pour un même domaine, ERA5 échantillonne plus finement les variations spatiales de précipitation que MERRA‑2.
+
+### 3. Comparaison de la température dans le temps
+
+#### En moyenne
+
+```{r}
+df_era5_mean <- df_era5%>%
+  group_by(date)%>%
+  summarise( era_t2m = mean(era_t2m, na.rm = TRUE))
+
+
+df_merra2_mean <- df_merra2%>%
+  group_by(date)%>%
+  summarise( T2M = mean(T2M, na.rm = TRUE))
+
+df_plot_mean <- bind_rows(
+  df_merra2_mean %>%
+    rename(temperature = T2M)%>%
+    mutate(source = "MERRA-2"),
+  df_era5_mean %>%
+    rename(temperature = era_t2m)%>%
+    mutate(source = "ERA-5")
+    )
+
+ggplot(df_plot_mean, aes(x = date, y = temperature, color = source)) +
+  geom_line(size = 1) +
+  labs(x = "Date-heure (UTC)",
+       y = "Température sur la zone ",
+       color = "Source",
+       title = "Température horaire moyenne sur la zone\nERA5 vs MERRA-2 (en°C)") +
+  theme_minimal() +
+  theme(text = element_text(size = 12), legend.position = "bottom")
+
+```
+
+```{r}
+ggplot(df_plot_mean, aes(x = temperature, fill = source, color = source)) +
+  geom_density(alpha = 0.25) +
+  labs(x = "Température (°C)",
+       y = "Densité",
+       title = "Densité des températures\nERA5, MERRA-2 et observations") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+**Minimum**
+
+```{r}
+df_era5_min <- df_era5%>%
+  group_by(date)%>%
+  summarise( era_t2m = min(era_t2m, na.rm = TRUE))
+
+
+df_merra2_min <- df_merra2%>%
+  group_by(date)%>%
+  summarise( T2M = min(T2M, na.rm = TRUE))
+
+df_plot_min <- bind_rows(
+  df_merra2_min %>%
+    rename(temperature = T2M)%>%
+    mutate(source = "MERRA-2"),
+  df_era5_min %>%
+    rename(temperature = era_t2m)%>%
+    mutate(source = "ERA-5")
+    )
+
+ggplot(df_plot_min, aes(x = date, y = temperature, color = source)) +
+  geom_line(size = 1) +
+  labs(x = "Date-heure (UTC)",
+       y = "Température sur la zone ",
+       color = "Source",
+       title = "Température minimum journalière sur la zone\nERA5 vs MERRA-2 (en°C)") +
+  theme_minimal() +
+  theme(text = element_text(size = 12), legend.position = "bottom")
+
+```
+
+```{r}
+
+ggplot(df_plot_mean, aes(x = temperature, fill = source, color = source)) +
+  geom_density(alpha = 0.25) +
+  labs(x = "Température (°C)",
+       y = "Densité",
+       title = "Densité des températures\nERA5, MERRA-2 et observations") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+**Maximum**
+
+```{r}
+
+df_era5_max <- df_era5%>%
+  group_by(date)%>%
+  summarise( era_t2m = max(era_t2m, na.rm = TRUE))
+
+
+df_merra2_max <- df_merra2%>%
+  group_by(date)%>%
+  summarise( T2M = max(T2M, na.rm = TRUE))
+
+df_plot_max <- bind_rows(
+  df_merra2_max %>%
+    rename(temperature = T2M)%>%
+    mutate(source = "MERRA-2"),
+  df_era5_max %>%
+    rename(temperature = era_t2m)%>%
+    mutate(source = "ERA-5")
+    )
+
+ggplot(df_plot_max, aes(x = date, y = temperature, color = source)) +
+  geom_line(size = 1) +
+  labs(x = "Date-heure (UTC)",
+       y = "Température sur la zone ",
+       color = "Source",
+       title = "Température maximun jouralière sur la zone\nERA5 vs MERRA-2 (en°C)") +
+  theme_minimal() +
+  theme(text = element_text(size = 12), legend.position = "bottom")
+
+```
+
+```{r}
+ggplot(df_plot_mean, aes(x = temperature, fill = source, color = source)) +
+  geom_density(alpha = 0.25) +
+  labs(x = "Température (°C)",
+       y = "Densité",
+       title = "Densité des températures\nERA5, MERRA-2 et observations") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+Dans l'ensemble les deux réanalyses ERA5 et MERRA‑2 reproduisent de manière très proche la variabilité temporelle de la température sur la zone d’étude. Sur la série temporelle horaire, les courbes se superposent presque entièrement, ce qui indique que les deux produits capturent de façon cohérente les fluctuations saisonnières.
+
+La comparaison des distributions de température met cependant en évidence quelques différences plus fines. La densité ERA5 présente des valeurs légèrement plus élevées autour du maximum principal, traduisant une légère tendance à des températures un peu plus douces, tandis que MERRA‑2 montre une distribution très proche mais marginalement décalée vers des valeurs plus fraîches sur certains intervalles ce qui concorde avec la littérature. Globalement, les deux réanalyses montrent des distributions très similaires, ce qui confirme leur bonne cohérence pour la température de l’air à l’échelle régionale, avec des écarts systématiques faibles qui peuvent néanmoins être pertinents pour certaines analyses climatiques fines.
+
+### Ecarts par saison:
+
+```{r}
+df_era_mean_hiver <- df_era5_mean %>%
+  mutate(date = ymd(date),        
+         mois = month(date)) %>%  
+  filter(mois %in% c(12, 1, 2))
+
+df_merra_mean_hiver <- df_merra2_mean %>%
+  mutate(date = ymd(date),        
+         mois = month(date)) %>%  
+  filter(mois %in% c(12, 1, 2))
+
+df_cop_hiver <- bind_rows(
+  df_era_mean_hiver%>%
+    rename(temperature = era_t2m)%>%
+    mutate(source = "ERA-5"),
+  df_merra_mean_hiver %>%
+    rename(temperature = T2M)%>%
+    mutate(source = "MERRA-2")
+)
+
+
+ggplot(df_cop_hiver, aes(x = source, y = temperature, fill = source)) +
+  geom_violin(alpha = 0.6, outlier.alpha = 0.3) +
+  geom_boxplot(alpha = 0.6, outlier.alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "temperature",
+       y = "Biais de température (°C)",
+       title = "Distribution des biais\nERA5 - Obs et MERRA-2 - Obs") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+df_era_mean_ete <- df_era5_mean %>%
+  mutate(date = ymd(date),        
+         mois = month(date)) %>%  
+  filter(mois %in% c(6, 7, 8))
+
+df_merra_mean_ete <- df_merra2_mean %>%
+  mutate(date = ymd(date),        
+         mois = month(date)) %>%  
+  filter(mois %in% c(6, 7, 8))
+
+df_cop_ete <- bind_rows(
+  df_era_mean_ete%>%
+    rename(temperature = era_t2m)%>%
+    mutate(source = "ERA-5"),
+  df_merra_mean_ete %>%
+    rename(temperature = T2M)%>%
+    mutate(source = "MERRA-2")
+)
+
+
+ggplot(df_cop_ete, aes(x = source, y = temperature, fill = source)) +
+  geom_violin(alpha = 0.6, outlier.alpha = 0.3) +
+  geom_boxplot(alpha = 0.6, outlier.alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "temperature",
+       y = "Biais de température (°C)",
+       title = "Distribution des biais\nERA5 - Obs et MERRA-2 - Obs") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+df_era_mean_print <- df_era5_mean %>%
+  mutate(date = ymd(date),        
+         mois = month(date)) %>%  
+  filter(mois %in% c(3, 4, 5))
+
+df_merra_mean_print <- df_merra2_mean %>%
+  mutate(date = ymd(date),        
+         mois = month(date)) %>%  
+  filter(mois %in% c(3, 4, 5))
+
+df_cop_print <- bind_rows(
+  df_era_mean_print%>%
+    rename(temperature = era_t2m)%>%
+    mutate(source = "ERA-5"),
+  df_merra_mean_print %>%
+    rename(temperature = T2M)%>%
+    mutate(source = "MERRA-2")
+)
+
+
+ggplot(df_cop_print, aes(x = source, y = temperature, fill = source)) +
+  geom_violin(alpha = 0.6, outlier.alpha = 0.3) +
+    geom_boxplot(alpha = 0.6, outlier.alpha = 0.3) +
+
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "temperature",
+       y = "Biais de température (°C)",
+       title = "Distribution des biais\nERA5 - Obs et MERRA-2 - Obs") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+df_era_mean_aut <- df_era5_mean %>%
+  mutate(date = ymd(date),        
+         mois = month(date)) %>%  
+  filter(mois %in% c(9, 10, 11))
+
+df_merra_mean_aut <- df_merra2_mean %>%
+  mutate(date = ymd(date),        
+         mois = month(date)) %>%  
+  filter(mois %in% c(9, 10, 11))
+
+df_cop_aut <- bind_rows(
+  df_era_mean_aut%>%
+    rename(temperature = era_t2m)%>%
+    mutate(source = "ERA-5"),
+  df_merra_mean_aut %>%
+    rename(temperature = T2M)%>%
+    mutate(source = "MERRA-2")
+)
+
+
+ggplot(df_cop_aut, aes(x = source, y = temperature, fill = source)) +
+  geom_violin(alpha = 0.6, outlier.alpha = 0.3) +
+  geom_boxplot(alpha = 0.6, outlier.alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "temperature",
+       y = "Biais de température (°C)",
+       title = "Distribution des biais\nERA5 - Obs et MERRA-2 - Obs") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+## 3. Etude de cas: Le Puy-Loudes
+
+### 3.1 Localisation
+
+```{r, include = FALSE}
+#======================================#
+# Téléchargement des observations      #
+#======================================#
+
+meta <- read.csv("C:\\Users\\obonn\\OneDrive\\Documents\\STAGE INSA\\Le Puy-Loudes\\synop_2025.csv.gz",sep = ";")
+
+meta_2 <- meta%>%
+  filter(
+    lon >= 2.2, lon <= 7.7,
+    lat >= 44,  lat <= 47
+  )%>%
+  select(lat, lon, name, validity_time, t, td, pres)%>%
+  mutate(t = t - 273.15, 
+         td = td - 273.15, 
+         validity_time = ymd_hms(validity_time, tz = "UTC") )
+  
+
+plot(df_era5$lon, df_era5$lat,
+     xlim = c(2.2, 7.7),
+     ylim = c(44, 47),
+     xlab = "lon",
+     ylab = "lat",
+     pch = 16,
+     col = "lightblue")
+
+# 2) Ajouter le deuxième nuage (par ex. en rouge)
+points(df_merra2$lon, df_merra2$lat,
+       pch = 16,
+       col = "blue")
+
+points(meta_2$lon, meta_2$lat,   
+       pch = 16,
+       col = "red",
+       cex = 1.5)  
+
+text(x = meta_2$lon,
+     y = meta_2$lat,
+     labels = meta_2$name,  
+     pos = 4,                
+     cex = 0.7,
+     col = "red")
+
+meta_lpl <- meta_2%>%
+  filter(name == "LE PUY-LOUDES")%>%
+  mutate(pres_t = 6.112 * exp((17.62*t)/(243.12+t)),
+         pres_td = 6.112 * exp((17.62*td)/(243.12+td)),
+         relative_hum = 100 * (pres_td/pres_t),
+         relative_hum = pmin(pmax(relative_hum, 0), 100))
+
+library(dplyr)
+library(lubridate)
+
+lat_plp <- 45.0745
+lon_plp <- 3.764
+
+df_obs_mean <- meta_lpl %>%
+  mutate(
+    date = as_date(validity_time)   
+  ) %>%
+  group_by(date) %>%
+  summarise(
+    temp = mean(t, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+df_obs_min <- meta_lpl %>%
+  mutate(
+    date = as_date(validity_time)   
+  ) %>%
+  group_by(date) %>%
+  summarise(
+    MINtemp = min(t, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+df_obs_max <- meta_lpl %>%
+  mutate(
+    date = as_date(validity_time)   
+  ) %>%
+  group_by(date) %>%
+  summarise(
+    MAXtemp = max(t, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+
+```
+
+```{r}
+
+meta_sf <- meta_lpl %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(2154)
+
+
+ggplot() +
+  # DEM
+  geom_raster(
+    data = dem_df,
+    aes(x = x, y = y, fill = elev)
+  ) +
+  scale_fill_gradientn(
+    colours = c("white", "#238b45", "darkgreen", "#00441b", "black"),
+    name = "Altitude (m)"
+  ) +
+  # Polygones AURA (déjà en 2154)
+  geom_sf(data = aura_plus, fill = NA, color = "black") +
+  geom_sf(data = aura,      fill = NA, color = "black") +
+  # Grille ERA5
+  geom_sf(data = df_era5_sf,
+          shape = 3, size = 1.2, color = "blue") +
+  # Grille MERRA-2
+  geom_sf(data = df_merra_sf,
+          shape = 16, size = 1.2, color = "red") +
+  # Stations synop (optionnel)
+  geom_sf(data = meta_sf,
+          shape = 21, size = 2, fill = "yellow", color = "black") +
+  geom_sf_text(
+    data = meta_sf,
+    aes(label = name),
+    size = 2,
+    color = "black",
+    nudge_y = 10000
+  ) +
+  coord_sf(
+    xlim = st_bbox(aura_plus)[c("xmin", "xmax")],
+    ylim = st_bbox(aura_plus)[c("ymin", "ymax")],
+    expand = FALSE
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Grilles ERA5 et MERRA-2 et stations en AURA",
+    x = NULL, y = NULL
+  )
+
+```
+
+```{r}
+pt_ll <- st_as_sf(
+  data.frame(lon = c(3.75, 3.764), #position point ERA/MERRA
+    lat = c(45,    45.0745)), #position station le puy
+  coords = c("lon", "lat"),
+  crs = 4326
+)
+
+pt_l93 <- st_transform(pt_ll, 2154)
+
+# distance entre les points 
+d_m  <- st_distance(pt_l93[1, ], pt_l93[2, ])
+d_km <- as.numeric(d_m) / 1000
+d_km
+
+# niveau d'altitude 
+alt_pt <- extract(dem_l93, vect(pt_l93))
+alt_pt
+
+```
+
+### 3.2 Préparation des bases d'étude
+
+#### 3.2.1 Temperature
+
+```{r}
+#base d'observation
+df_obs_mean <- meta_lpl %>%
+  mutate(
+    date = as_date(validity_time)   
+  ) %>%
+  group_by(date) %>%
+  summarise(
+    temp = mean(t, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+#base era5
+df_era5_est_temp <- df_era5%>%
+  filter( lon == 3.75, lat ==45)%>%
+  group_by(date)%>%
+  summarise( t_mean = mean(era_t2m, na.rm = T),
+             t_min = min(era_t2m, na.rm = T),
+             t_max = max(era_t2m, na.rm = T), 
+             lon  = first(lon),
+             lat  = first(lat))
+
+#base merra2
+df_merra2_est_temp <- df_merra2%>%
+  filter(lon == 3.75, lat ==45)%>%
+  group_by(date)%>%
+  summarise( t_mean = mean(T2M, na.rm = T),
+             t_min = min(T2M, na.rm = T),
+             t_max = max(T2M, na.rm = T), 
+             lon  = first(lon),
+             lat  = first(lat))
+
+```
+
+#### 3.2.2 Humidité relative
+
+```{r}
+
+df_obs_mean_hum <- meta_lpl %>%
+  mutate(
+    date = as_date(validity_time)   
+  ) %>%
+  group_by(date) %>%
+  summarise(hum_mean = mean(relative_hum, na.rm = T),
+             hum_min = min(relative_hum, na.rm = T),
+             hum_max = max(relative_hum, na.rm = T)
+  ) %>%
+  ungroup()
+
+df_era5_est_hum <- df_era5%>%
+  filter( lon == 3.75, lat ==45)%>%
+  group_by(date)%>%
+  summarise( hum_mean = mean(relative_hum, na.rm = T),
+             hum_min = min(relative_hum, na.rm = T),
+             hum_max = max(relative_hum, na.rm = T), 
+             lon  = first(lon),
+             lat  = first(lat))
+
+df_merra2_est_hum <- df_merra2 %>%
+  filter(lon == 3.75, lat ==45)%>%
+  group_by(date)%>%
+  summarise( hum_mean = mean(relative_hum, na.rm = T),
+             hum_min = min(relative_hum, na.rm = T),
+             hum_max = max(relative_hum, na.rm = T), 
+             lon  = first(lon),
+             lat  = first(lat))
+
+
+```
+
+### 3.3 Température
+
+#### 3.3.1 MERRA-2 vs Observations
+
+```{r}
+df_plot_merra <- bind_rows(
+  df_merra2_est_temp %>% 
+    rename(temp = t_mean, datetime = date ) %>%
+    mutate(source = "MERRA-2"),
+  df_obs_mean%>%
+    rename(temp = temp, datetime = date)%>%
+    mutate(source = "Observations")
+)
+
+ggplot(df_plot_merra, aes(x = datetime, y = temp, color = source)) +
+  geom_line(size = 1) +
+  labs(x = "Date-heure (UTC)",
+       y = "Température sur la zone ",
+       color = "Source",
+       title = "Evolution de la température:  MERRA-2 vs Observations (en°C)") +
+  theme_minimal() +
+  theme(text = element_text(size = 12), legend.position = "bottom")
+
+```
+
+```{r}
+
+df_join1 <- df_merra2_est_temp %>%
+  rename(date = date, temp_merra = t_mean)%>%
+  inner_join(
+    df_obs_mean ,
+    by = "date"  
+  )
+
+# Corrélation MERRA2 vs Obs
+cor_merra_obs <- cor(df_join1$temp_merra, df_join1$temp, use = "complete.obs", method = "pearson")
+cor_merra_obs
+ggplot(df_join1, aes(x = temp_merra, y = temp)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    x = "Température obs (%)",
+    y = "Température MERRA2 (%)",
+    title = "Nuage de points : MERRA2 vs observations"
+  ) +
+  theme_minimal()
+```
+
+Les températures MERRA‑2 sont très fortement corrélées aux observations, avec un coefficient de corrélation de 0,98. Cette valeur proche de 1 indique que la réanalyse reproduit fidèlement la variabilité temporelle observée, en particulier l’enchaînement des épisodes froids et chauds au cours de l’année. Le nuage de points est très resserré autour de la diagonale, ce qui montre qu’aux échelles horaires considérées.
+
+#### 3.3.2 ERA-5 vs Observations
+
+```{r}
+
+df_plot_era <- bind_rows(
+  df_era5_est_temp %>% 
+    rename(temp = t_mean, datetime = date ) %>%
+    mutate(source = "ERA-5"),
+  df_obs_mean%>%
+    rename(temp = temp, datetime = date)%>%
+    mutate(source = "Observations")
+)
+
+ggplot(df_plot_era, aes(x = datetime, y = temp, color = source)) +
+  geom_line(size = 1) +
+  labs(x = "Date-heure (UTC)",
+       y = "Température sur la zone ",
+       color = "Source",
+       title = "Evolution de la température:  ERA5 vs Observations (en°C)") +
+  theme_minimal() +
+  theme(text = element_text(size = 12), legend.position = "bottom")
+
+```
+
+```{r}
+df_join2 <- df_era5_est_temp %>%
+  rename( temp_era = t_mean)%>%
+  inner_join(
+    df_obs_mean ,
+    by = "date"  
+  )
+
+# Corrélation MERRA2 vs Obs
+cor_era_obs <- cor(df_join2$temp_era, df_join2$temp, use = "complete.obs", method = "pearson")
+cor_era_obs
+
+ggplot(df_join2, aes(x = temp_era, y = temp)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    x = "Température obs (%)",
+    y = "Température ERA5 (%)",
+    title = "Nuage de points : ERA5 vs observations"
+  ) +
+  theme_minimal()
+
+```
+
+Les températures ERA5 présentent une très forte concordance avec les observations, avec un coefficient de corrélation de 0,99. Cette valeur quasi parfaite montre qu’ERA5 reproduit de manière extrêmement fidèle la variabilité temporelle observée, y compris les principales fluctuations intra‑saisonnières et saisonnières. Le nuage de points est très resserré autour de la diagonale, ce qui indique des écarts systématiques faibles et confirme la bonne qualité d’ERA5 pour représenter la température de l’air sur la zone étudiée
+
+#### 3.3.3 Etudes comparative des erreurs
+
+```{r}
+
+##### Etude des erreurs #####
+df_era <- df_era5_mean %>% 
+  rename(datetime = date, temp_era = era_t2m)
+
+df_merra <- df_merra2_mean %>% 
+  rename(temp_merra = T2M, datetime = date)
+
+df_o <- df_obs_mean %>% 
+  rename(datetime = date, temp_obs = temp)
+
+# Jointure sur le temps
+df_join <- df_o %>%
+  left_join(df_era,  by = "datetime") %>%
+  left_join(df_merra, by = "datetime") 
+
+
+# Biais ERA-obs et MERRA-obs
+df_bias <- df_join %>%
+  mutate(
+    bias_era   = temp_era   - temp_obs,
+    bias_merra = temp_merra - temp_obs
+  ) %>%
+  select(datetime, bias_era, bias_merra)
+
+  
+
+# Long format pour ggplot
+df_bias_long <- df_bias %>%
+  tidyr::pivot_longer(
+    cols      = c(bias_era, bias_merra),
+    names_to  = "source",
+    values_to = "bias"
+  ) %>%
+  mutate(source = dplyr::recode(source,
+                                "bias_era"   = "ERA5 - Obs",
+                                "bias_merra" = "MERRA-2 - Obs"))
+
+
+# Série temporelle des biais
+ggplot(df_bias_long, aes(x = datetime, y = bias, color = source)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_line(alpha = 0.8) +
+  labs(x = "Date-heure (UTC)",
+       y = "Biais de température (°C)",
+       color = "Biais",
+       title = "Évolution temporelle des biais\nERA5 - Obs et MERRA-2 - Obs") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggplot(df_bias_long, aes(x = bias, fill = source, color = source)) +
+  geom_density(alpha = 0.25) +
+  labs(x = "Biais de température (°C)",
+       y = "Densité",
+       title = "Densité des biais de température\nERA5 - Obs et MERRA-2 - Obs") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Boîtes à moustaches des biais
+ggplot(df_bias_long, aes(x = source, y = bias, fill = source)) +
+  geom_boxplot(alpha = 0.6, outlier.alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "Biais",
+       y = "Biais de température (°C)",
+       title = "Distribution des biais\nERA5 - Obs et MERRA-2 - Obs") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+
+t.test(df_bias$bias_era, mu = 0)
+t.test(df_bias$bias_merra, mu = 0)
+
+```
+
+Les biais de température par rapport aux observations restent globalement modérés pour les deux réanalyses, mais leur évolution temporelle met en évidence quelques différences. On observe des fluctuations autour de zéro tout au long de l’année, avec des épisodes ponctuels de sur‑ et sous‑estimation pouvant atteindre plusieurs degrés, notamment en période estivale. Les boxplots montrent que la médiane des biais d’ERA5 est légèrement plus proche de zéro que celle de MERRA‑2, et que la dispersion des biais y est un peu plus faible. Cela suggère qu’ERA5 présente, en moyenne, un biais plus faible et une variabilité d’erreur légèrement réduite par rapport à MERRA‑2 sur la zone étudiée.
+
+Les tests de Student sur les biais de température confirment l’existence de biais systématiques significatifs pour les deux réanalyses par rapport aux observations. Pour ERA5, le biais moyen est d’environ 0,30 °C, avec une p‑value de $7,8×10^{-8}$, ce qui indique une différence statistiquement significative par rapport à une moyenne nulle. Pour MERRA‑2, le biais moyen est plus élevé, autour de 0,48 °C, avec une p‑value de $2,5×10^{-10}$. Ces résultats montrent que les deux réanalyses tendent à surestimer légèrement la température, ce biais étant toutefois plus marqué pour MERRA‑2 que pour ERA5.
+
+```{r}
+#---------------------------------------------------------------------------
+#                 Indicateurs d'erreur classique 
+#---------------------------------------------------------------------------
+
+resume <- df_join %>%
+  summarise(
+    # ERA5
+    mbe_era5  = mean(temp_era  - temp_obs , na.rm = TRUE),
+    mae_era5  = mean(abs(temp_era  - temp_obs ), na.rm = TRUE),
+    rmse_era5 = sqrt(mean((temp_era  - temp_obs )^2, na.rm = TRUE)),
+    
+    # MERRA-2
+    mbe_merra  = mean(temp_merra - temp_obs , na.rm = TRUE),
+    mae_merra  = mean(abs(temp_merra - temp_obs ), na.rm = TRUE),
+    rmse_merra = sqrt(mean((temp_merra - temp_obs )^2, na.rm = TRUE))
+  )
+resume
+```
+
+|                            | ERA-5 | MERRA-2 |
+|----------------------------|-------|---------|
+| Erreur moyenne de biais    | 0.30  | 0.48    |
+| Erreur absolue moyenne     | 0.85  | 1.20    |
+| Erreur quadratique moyenne | 1.09  | 1.49    |
+| Coefficient de corrélation | 0.99  | 0.98    |
+
+Les indicateurs d’erreur confirment la meilleure performance d’ERA5 par rapport à MERRA‑2 pour la température sur la zone étudiée. Dans l'ensemble ERA5 cumule des erreurs plus faire ansi qu'un coefficient de corrélation avec les observations plus fort. Cela indique que ERA5 est globalement plus précis et moins biaisé vis à vis des observations que MERRA-2. Ces résultats suivent les ceux de la littérature.
+
+### 3.4 Humidité
+
+On calcule l’humidité relative à partir de la température de l’air $T$ et de la température de rosée $Td$​ en utilisant la pression de vapeur saturante.
+
+L'humidité relative se calcule par : $$RH = 100 \times \frac{e(T_d)}{e(T)}$$ où $RH$ est l'humidité relative en %, et $e(T)$ et $e(T_d)$ sont les pressions de vapeur saturante évaluées respectivement à $T$ et $T_d$ (en $^\circ\mathrm{C}$).
+
+On approxime souvent $e(T)$ par (et $e(T_d)$ : $$e(T) = 6{,}112 \times \exp\left(\frac{17{,}62 \, T}{243{,}12 + T}\right)$$
+
+#### 3.3.1 MERRA-2 vs Observations
+
+```{r}
+
+plot_merra_mean <- bind_rows(
+  df_merra2_est_hum %>% 
+    rename(humidity = hum_mean) %>%
+    mutate(source = "MERRA2"),
+  df_obs_mean_hum%>%
+    rename(humidity = hum_mean)%>%
+    mutate(source = "Observations")
+)
+
+
+# Graphique 
+
+
+ggplot(plot_merra_mean, aes(x = date, y = humidity, color = source)) +
+  geom_line(size = 1) +
+  labs(x = "Date-heure (UTC)",
+       y = "Humidité relative ",
+       color = "Source",
+       title = "Humidité relative: comparaison entre observations et réanalyse MERRA2 (en %)") +
+  theme_minimal() +
+  theme(text = element_text(size = 12), legend.position = "bottom")
+
+
+```
+
+```{r}
+
+comp_merra <- df_merra2_est_hum %>%
+  rename(hum_merra = hum_mean) %>%
+  inner_join(
+    df_obs_mean_hum ,
+    by = "date"  
+  )
+
+ggplot(comp_merra, aes(x = hum_mean, y = hum_merra)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    x = "Humidité obs (%)",
+    y = "Humidité MERRA2 (%)",
+    title = "Nuage de points : MERRA2 vs observations"
+  ) +
+  theme_minimal() 
+
+cor_merra_obs <- cor(comp_merra$hum_mean, comp_merra$hum_merra, use = "complete.obs", method = "pearson")
+cor_merra_obs
+
+```
+
+Pour l’humidité relative, la réanalyse MERRA‑2 présente une corrélation modérée avec les observations, avec un coefficient de corrélation d’environ 0,77. Le nuage de points montre une relation globalement linéaire entre MERRA‑2 et les mesures, mais avec une dispersion plus marquée que pour la température, en particulier aux faibles et fortes humidités. La série temporelle indique que MERRA‑2 reproduit correctement la structure générale de la variabilité de l’humidité (saisonnalité et épisodes secs/humides), tout en présentant des écarts ponctuels plus importants, ce qui suggère une performance satisfaisante mais moins robuste que pour la température.
+
+#### 3.3.2 ERA-5 vs Observations
+
+```{r}
+plot_era_mean_hum <- bind_rows(
+  df_era5_est_hum %>% 
+    rename(humidity = hum_mean) %>%
+    mutate(source = "ERA5"),
+  df_obs_mean_hum%>%
+    rename(humidity = hum_mean)%>%
+    mutate(source = "Observations"))
+  
+  
+ggplot(plot_era_mean_hum, aes(x = date, y = humidity, color = source)) +
+  geom_line(size = 1) +
+  labs(x = "Date-heure (UTC)",
+       y = "Humidité relative ",
+       color = "Source",
+       title = " Humidité relative horaire à Le Puy‑Loudes : comparaison entre observations et réanalyse ERA5 (année 2025) (en %)") +
+  theme_minimal() +
+  theme(text = element_text(size = 12), legend.position = "bottom")
+
+```
+
+```{r}
+comp_era <- df_era5_est_hum %>%
+  rename(hum_era = hum_mean) %>%
+  inner_join(
+    df_obs_mean_hum ,
+    by = "date"  
+  )
+
+ggplot(comp_era, aes(x = hum_mean, y = hum_era)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    x = "Humidité obs (%)",
+    y = "Humidité ERA5 (%)",
+    title = "Nuage de points : ERA5 vs observations"
+  ) +
+  theme_minimal()
+
+cor_era_obs <- cor(comp_era$hum_mean, comp_era$hum_era, use = "complete.obs", method = "pearson")
+cor_era_obs
+```
+
+Pour l’humidité relative, ERA5 présente une très bonne concordance avec les observations, avec un coefficient de corrélation d’environ 0,90. La série temporelle montre que la réanalyse reproduit fidèlement la variabilité horaire et saisonnière de l’humidité, ainsi que les principaux épisodes secs et humides. La corrélation plus élevée obtenue pour ERA5, comparée à celle de MERRA‑2, confirme la meilleure capacité de cette réanalyse à représenter l’humidité relative sur la station étudiée.
+
+#### 3.3.3 Etudes comparative des erreurs
+
+```{r}
+df_obs <- df_obs_mean_hum%>%
+  rename(hum_r_obs = hum_mean)
+
+df_era <- df_era5_est_hum%>%
+  rename(hum_r_era = hum_mean)
+
+df_merra <- df_merra2_est_hum%>%
+  rename(hum_r_merra = hum_mean)
+
+
+df_join <- df_obs %>%
+  left_join(df_era,  by = "date") %>%
+  left_join(df_merra, by = "date") 
+
+df_bias <- df_join %>%
+  mutate(
+    bias_era   = hum_r_era   - hum_r_obs,
+    bias_merra = hum_r_merra - hum_r_obs
+  ) %>%
+  select(date, bias_era, bias_merra)
+
+df_bias_long <- df_bias %>%
+  tidyr::pivot_longer(
+    cols      = c(bias_era, bias_merra),
+    names_to  = "source",
+    values_to = "bias"
+  ) %>%
+  mutate(source = dplyr::recode(source,
+                                "bias_era"   = "ERA5 - Obs",
+                                "bias_merra" = "MERRA-2 - Obs"))
+
+ggplot(df_bias_long, aes(x = date, y = bias, color = source)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_line(alpha = 0.8) +
+  labs(x = "Date-heure (UTC)",
+       y = "Biais d'humidité (en %)",
+       color = "Biais",
+       title = "Évolution temporelle des biais\nERA5 - Obs et MERRA-2 - Obs") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggplot(df_bias_long, aes(x = bias, fill = source, color = source)) +
+  geom_density(alpha = 0.25) +
+  labs(x = "Biais de température (°C)",
+       y = "Densité",
+       title = "Densité des biais de température\nERA5 - Obs et MERRA-2 - Obs") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggplot(df_bias_long, aes(x = source, y = bias, fill = source)) +
+  geom_boxplot(alpha = 0.6, outlier.alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(x = "Biais",
+       y = "Biais d'humidité (°C)",
+       title = "Distribution des biais\nERA5 - Obs et MERRA-2 - Obs") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+t.test(df_bias$bias_era, mu = 0)
+t.test(df_bias$bias_merra, mu = 0)
+```
+
+Pour les biais d’humidité relative, les boxplots et les distributions mettent clairement en évidence une meilleure performance d’ERA5 par rapport à MERRA‑2. La boîte d’ERA5 est plus resserrée et centrée plus près de zéro, avec des extrêmes moins marqués, ce qui traduit des biais généralement plus faibles et moins variables. À l’inverse, la boîte de MERRA‑2 est plus large et décalée vers les valeurs positives, indiquant une surestimation plus fréquente et plus forte de l’humidité, ainsi qu’une dispersion accrue des erreurs.
+
+Les tests de Student sur les biais confirment l’existence de biais systématiques significatifs pour les deux réanalyses. Pour ERA5, le biais moyen est d’environ 1,41 °C. Pour MERRA‑2, le biais moyen est plus élevé, autour de 2,39 °C et significatif. Ces résultats montrent que les deux jeux de réanalyses présentent une tendance à la surestimation de la température par rapport aux observations, mais que ce biais est plus marqué pour MERRA‑2 que pour ERA5.
+
+```{r}
+resume <- df_join %>%
+  summarise(
+    # ERA5
+    mbe_era5  = mean(hum_r_era   - hum_r_obs , na.rm = TRUE),
+    mae_era5  = mean(abs(hum_r_era   - hum_r_obs ), na.rm = TRUE),
+    rmse_era5 = sqrt(mean((hum_r_era   - hum_r_obs )^2, na.rm = TRUE)),
+    
+    # MERRA-2
+    mbe_merra  = mean(hum_r_merra  - hum_r_obs , na.rm = TRUE),
+    mae_merra  = mean(abs(hum_r_merra  - hum_r_obs ), na.rm = TRUE),
+    rmse_merra = sqrt(mean((hum_r_merra  - hum_r_obs)^2, na.rm = TRUE))
+  )
+resume
+
+```
+
+|                            | ERA-5 | MERRA-2 |
+|----------------------------|-------|---------|
+| Erreur moyenne de biais    | 1.41  | 2.39    |
+| Erreur absolue moyenne     | 4.71  | 8.19    |
+| Erreur quadratique moyenne | 5.88  | 10.44   |
+| Coefficient de corrélation | 0.90  | 0.77    |
+
+Les erreurs confirment que, pour l’humidité relative, ERA5 surperforme nettement MERRA‑2 sur la station étudiée. Le biais moyen d’ERA5 reste modéré (MBE ≈ 1,4%), tandis que celui de MERRA‑2 est plus élevé (≈ 2,4%), traduisant une surestimation plus marquée. De plus, dans l'ensemble de l'étude des erreurs, elles sont nettement plus faibles pour ERA5 que pour MERRA‑2, ce qui indique des écarts globaux plus faibles vis‑à‑vis des observations.
+
+## Conclusion
+
+Au regard des résultats obtenus sur la période 2025 et sur l'ensemble des points de la région Auvergne-Rhône-Alpes, **ERA5** apparaît comme la base de données la plus adaptée aux analyses ultérieures de ce projet.
+
+- **Construction**
+
+  - Résolution plus fine, ERA5 est produite à une résolution horizontale d’environ 0,25° plus fine que celle de MERRA‑2, ce qui permet de mieux représenter les contrastes régionaux et les effets de relief, cruciaux en Auvergne‑Rhône‑Alpes
+
+  - Meilleur système d'assimilation des données: ERA5 repose sur un système d’assimilation 4D‑Var de dernière génération et intègre un ensemble plus large et plus récent d’observations satellitaires et in situ que MERRA‑2, ce qui améliore la cohérence et la qualité de la reconstitution du climat récent.
+
+- **Température**
+
+  - Corrélation légèrement plus élevée avec les observations pour ERA5 que pour MERRA‑2.\
+  - Biais moyen plus faible pour ERA5 (≈ 0,3 °C) que pour MERRA‑2 (≈ 0,5 °C).\
+  - MAE et RMSE de température systématiquement plus faibles pour ERA5.
+
+- **Humidité relative**
+
+  - Corrélation forte entre ERA5 et les observations (≈ 0,90), supérieure à celle de MERRA‑2.\
+  - Biais d’humidité d’ERA5 plus proches de zéro et moins dispersés que ceux de MERRA‑2.\
+  - MAE et RMSE d’ERA5 nettement inférieurs à ceux de MERRA‑2 pour l’humidité.
